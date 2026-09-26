@@ -1,0 +1,252 @@
+import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { App } from 'supertest/types';
+import request from 'supertest';
+import { randomUUID } from 'crypto';
+import { AppModule } from '../src/app.module';
+import { configureApplication } from '../src/app.config';
+import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
+import { AuthService } from '../src/auth/auth.service';
+import { EmailService } from '../src/auth/email.service';
+import { TokenService } from '../src/auth/token.service';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../src/infrastructure/redis/redis.module';
+import { RedisThrottlerStorage } from '../src/infrastructure/redis/redis-throttler.storage';
+
+describe('Segurança de autenticação (e2e)', () => {
+  let app: INestApplication<App>;
+  let prisma: PrismaService;
+  let auth: AuthService;
+  let tokens: TokenService;
+  const userIds: string[] = [];
+  const sendPasswordReset = jest
+    .fn<Promise<void>, [string, string]>()
+    .mockResolvedValue(undefined);
+  const password = 'senha-segura-de-teste';
+
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(EmailService)
+      .useValue({ sendPasswordReset })
+      .compile();
+    app = module.createNestApplication();
+    configureApplication(app);
+    await app.init();
+    prisma = app.get(PrismaService);
+    auth = app.get(AuthService);
+    tokens = app.get(TokenService);
+  });
+
+  async function account() {
+    const result = await auth.register({
+      name: 'Teste de segurança',
+      email: `review-${randomUUID()}@example.com`,
+      password,
+      role: 'GUEST',
+    });
+    userIds.push(result.user.id);
+    return result;
+  }
+
+  it('bloqueia acesso anônimo e campos de privilégio no cadastro', async () => {
+    await request(app.getHttpServer()).get('/users/me').expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        name: 'Admin',
+        email: 'invalid@example.com',
+        password,
+        role: 'ADMIN',
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        name: 'Admin',
+        email: 'invalid@example.com',
+        password,
+        role: 'GUEST',
+        status: 'ACTIVE',
+      })
+      .expect(400);
+  });
+
+  it('mantém contador temporário e bloqueia requisições concorrentes no Redis', async () => {
+    const redis = app.get<Redis>(REDIS_CLIENT);
+    const storage = new RedisThrottlerStorage(redis);
+    const key = randomUUID();
+    const baseKey = `throttle:review:${key}`;
+    try {
+      // Reproduz interrupção entre INCR e PEXPIRE da implementação anterior.
+      await redis.set(baseKey, '1');
+      const result = await storage.increment(key, 60000, 3, 60000, 'review');
+      expect(result.timeToExpire).toBeGreaterThan(0);
+      expect(result.timeToExpire).toBeLessThanOrEqual(60);
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          storage.increment(key, 60000, 3, 60000, 'review'),
+        ),
+      );
+      expect(results.filter((record) => !record.isBlocked)).toHaveLength(1);
+      expect(
+        results.find((record) => record.isBlocked)?.timeToBlockExpire,
+      ).toBeLessThanOrEqual(60);
+      expect(await redis.pttl(baseKey)).toBeGreaterThan(0);
+    } finally {
+      await redis.del(baseKey, `${baseKey}:block`);
+    }
+  });
+
+  it('normaliza DTOs e impede alterar outro usuário ou os próprios papéis', async () => {
+    const session = await account();
+    const cookie = `access_token=${session.accessToken}`;
+    await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Cookie', cookie)
+      .send({ name: '   ' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Cookie', cookie)
+      .send({ roles: ['ADMIN'], id: randomUUID() })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Cookie', cookie)
+      .send({
+        name: '  Nome atualizado  ',
+        email: `  ${session.user.email.toUpperCase()}  `,
+      })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({
+          name: 'Nome atualizado',
+          email: session.user.email,
+          roles: ['GUEST'],
+        });
+        expect(body).not.toHaveProperty('passwordHash');
+      });
+  });
+
+  it('cria um único perfil sob concorrência', async () => {
+    const session = await account();
+    await Promise.all(
+      Array.from({ length: 3 }, () =>
+        request(app.getHttpServer())
+          .post('/users/me/profiles/owner')
+          .set('Cookie', `access_token=${session.accessToken}`)
+          .expect(201),
+      ),
+    );
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: session.user.id },
+    });
+    expect(user.roles).toEqual(['GUEST', 'OWNER']);
+    expect(
+      await prisma.ownerProfile.count({ where: { userId: user.id } }),
+    ).toBe(1);
+  });
+
+  it('permite uma única rotação concorrente e revoga o acesso anterior', async () => {
+    const session = await account();
+    const results = await Promise.allSettled([
+      tokens.rotateSession(session.refreshToken),
+      tokens.rotateSession(session.refreshToken),
+    ]);
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
+    expect(
+      await prisma.authSession.count({
+        where: { userId: session.user.id, revokedAt: null },
+      }),
+    ).toBe(1);
+  });
+
+  it('preserva a sessão anterior se a criação da substituta falhar', async () => {
+    const session = await account();
+    const failure = jest
+      .spyOn(tokens, 'createSession')
+      .mockRejectedValueOnce(new Error('Falha de persistência simulada'));
+    try {
+      await expect(tokens.rotateSession(session.refreshToken)).rejects.toThrow(
+        'Falha de persistência simulada',
+      );
+      await expect(
+        tokens.authenticate(session.accessToken),
+      ).resolves.toMatchObject({ id: session.user.id });
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('logout revoga o access token mesmo sem recebê-lo no pedido', async () => {
+    const session = await account();
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Cookie', `refresh_token=${session.refreshToken}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Cookie', `access_token=${session.accessToken}`)
+      .expect(401);
+  });
+
+  it('nega login, acesso e renovação para usuário inativo', async () => {
+    const session = await account();
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { status: 'INACTIVE' },
+    });
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).rejects.toThrow();
+    await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
+    await expect(tokens.rotateSession(session.refreshToken)).rejects.toThrow();
+  });
+
+  it('recupera a senha, impede reutilização do token e revoga sessões', async () => {
+    const session = await account();
+    await auth.requestPasswordReset({ email: session.user.email });
+    const firstToken = sendPasswordReset.mock.calls.find(
+      ([email]) => email === session.user.email,
+    )?.[1];
+    expect(firstToken).toBeDefined();
+    await auth.requestPasswordReset({ email: session.user.email });
+    const token = sendPasswordReset.mock.calls.at(-1)?.[1];
+    if (!firstToken || !token) {
+      throw new Error('O envio dos tokens de recuperação não foi registrado.');
+    }
+    const stored = await prisma.passwordResetToken.findFirstOrThrow({
+      where: { userId: session.user.id },
+    });
+    expect(stored.tokenHash).not.toBe(token);
+    const newPassword = 'outra-senha-segura';
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token, password: newPassword })
+      .expect(204);
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token, password })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token: firstToken, password })
+      .expect(401);
+    await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).rejects.toThrow();
+    await expect(
+      auth.login({ email: session.user.email, password: newPassword }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
+  afterAll(async () => {
+    if (prisma)
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    if (app) await app.close();
+  });
+});

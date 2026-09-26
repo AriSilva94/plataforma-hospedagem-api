@@ -20,7 +20,7 @@ enum UserStatus {
 }
 
 model User {
-  id                  String               @id @default(uuid()) @db.Uuid
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                String
   email               String               @unique
   passwordHash        String               @map("password_hash")
@@ -37,7 +37,7 @@ model User {
 }
 
 model GuestProfile {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String   @unique @map("user_id") @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
@@ -47,7 +47,7 @@ model GuestProfile {
 }
 
 model OwnerProfile {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String   @unique @map("user_id") @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
@@ -57,7 +57,7 @@ model OwnerProfile {
 }
 
 model AuthSession {
-  id               String   @id @default(uuid()) @db.Uuid
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId           String   @map("user_id") @db.Uuid
   refreshTokenHash String   @map("refresh_token_hash")
   expiresAt        DateTime @map("expires_at")
@@ -71,7 +71,7 @@ model AuthSession {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
   tokenHash String   @unique @map("token_hash")
   expiresAt DateTime @map("expires_at")

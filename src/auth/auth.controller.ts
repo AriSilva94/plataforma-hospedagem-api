@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  HttpCode,
-  Post,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -15,7 +7,6 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 
 @Controller('auth')
@@ -63,9 +54,10 @@ export class AuthController {
     return { authenticated: true };
   }
 
+  // Sem guard: encerrar a sessão precisa funcionar mesmo com o access token expirado.
   @Post('logout')
   @HttpCode(204)
-  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async logout(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,

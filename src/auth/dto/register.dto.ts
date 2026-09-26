@@ -5,13 +5,16 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { NormalizeEmail, Trim } from '../../common/transforms';
 
 export class RegisterDto {
+  @Trim()
   @IsString()
   @MinLength(2)
   @MaxLength(120)
   name!: string;
 
+  @NormalizeEmail()
   @IsEmail()
   email!: string;
 

@@ -17,18 +17,20 @@ export class JwtAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const token = request.cookies?.access_token as string | undefined;
+    const cookies: unknown = request.cookies;
+    const token =
+      typeof cookies === 'object' &&
+      cookies !== null &&
+      'access_token' in cookies &&
+      typeof cookies.access_token === 'string'
+        ? cookies.access_token
+        : undefined;
 
     if (!token) {
       throw new UnauthorizedException('Autenticação necessária.');
     }
 
-    try {
-      const payload = await this.tokenService.verifyAccessToken(token);
-      request.user = { id: payload.sub, roles: payload.roles };
-      return true;
-    } catch {
-      throw new UnauthorizedException('Sessão inválida ou expirada.');
-    }
+    request.user = await this.tokenService.authenticate(token);
+    return true;
   }
 }
