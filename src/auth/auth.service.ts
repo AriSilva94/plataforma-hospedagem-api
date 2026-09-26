@@ -6,6 +6,8 @@ import {
 import { Role, User } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';
+import { PublicUser, toPublicUser } from '../users/public-user';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -13,11 +15,6 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from './email.service';
 import { PasswordService } from './password.service';
 import { AuthTokens, TokenService } from './token.service';
-
-type PublicUser = Pick<
-  User,
-  'id' | 'name' | 'email' | 'status' | 'roles' | 'createdAt' | 'updatedAt'
->;
 
 export type AuthResult = AuthTokens & { user: PublicUser };
 
@@ -31,9 +28,8 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResult> {
-    const email = dto.email.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email: dto.email },
     });
 
     if (existingUser) {
@@ -46,8 +42,8 @@ export class AuthService {
       user = await this.prisma.$transaction(async (transaction) =>
         transaction.user.create({
           data: {
-            name: dto.name.trim(),
-            email,
+            name: dto.name,
+            email: dto.email,
             passwordHash,
             roles: [dto.role],
             ...(dto.role === Role.GUEST
@@ -57,18 +53,19 @@ export class AuthService {
         }),
       );
     } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
+      if (isUniqueConstraintError(error)) {
         throw new ConflictException('Já existe uma conta com este e-mail.');
       }
       throw error;
     }
     const tokens = await this.tokenService.createSession(user);
-    return { ...tokens, user: this.toPublicUser(user) };
+    return { ...tokens, user: toPublicUser(user) };
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {
-    const email = dto.email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
     const isValidPassword =
       user &&
       (await this.passwordService.verify(user.passwordHash, dto.password));
@@ -78,12 +75,12 @@ export class AuthService {
     }
 
     const tokens = await this.tokenService.createSession(user);
-    return { ...tokens, user: this.toPublicUser(user) };
+    return { ...tokens, user: toPublicUser(user) };
   }
 
   async requestPasswordReset(dto: ForgotPasswordDto): Promise<void> {
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.trim().toLowerCase() },
+      where: { email: dto.email },
     });
 
     if (!user) {
@@ -132,6 +129,13 @@ export class AuthService {
           'O link de redefinição é inválido ou expirou.',
         );
       }
+      await transaction.passwordResetToken.updateMany({
+        where: {
+          userId: resetToken.userId,
+          usedAt: null,
+        },
+        data: { usedAt: new Date() },
+      });
       await transaction.user.update({
         where: { id: resetToken.userId },
         data: { passwordHash },
@@ -153,26 +157,5 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
-  }
-
-  private toPublicUser(user: User): PublicUser {
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      status: user.status,
-      roles: user.roles,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    };
-  }
-
-  private isUniqueConstraintError(error: unknown): error is { code: string } {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
-    );
   }
 }

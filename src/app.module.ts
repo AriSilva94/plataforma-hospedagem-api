@@ -26,7 +26,10 @@ import { UsersModule } from './users/users.module';
             limit: Number(environmentService.get('THROTTLE_LIMIT') ?? 100),
           },
         ],
-        storage: new RedisThrottlerStorage(redis),
+        storage: new RedisThrottlerStorage(
+          redis,
+          environmentService.get('THROTTLE_KEY_PREFIX') ?? 'throttle',
+        ),
       }),
     }),
     AuthModule,

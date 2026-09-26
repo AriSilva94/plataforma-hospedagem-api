@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { Role, User } from '@prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import {
+  isRecordNotFoundError,
+  isUniqueConstraintError,
+} from '../infrastructure/prisma/prisma-error';
+import { toPublicUser } from './public-user';
 import { UpdateMeDto } from './dto/update-me.dto';
 
 @Injectable()
@@ -21,13 +26,13 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado.');
     }
 
-    return this.toPublicUser(user);
+    return this.withProfiles(user);
   }
 
   async updateMe(userId: string, dto: UpdateMeDto) {
     const data = {
-      ...(dto.name ? { name: dto.name.trim() } : {}),
-      ...(dto.email ? { email: dto.email.trim().toLowerCase() } : {}),
+      ...(dto.name ? { name: dto.name } : {}),
+      ...(dto.email ? { email: dto.email } : {}),
     };
 
     try {
@@ -35,12 +40,12 @@ export class UsersService {
         where: { id: userId },
         data,
       });
-      return this.toPublicUser(user);
+      return this.withProfiles(user);
     } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
+      if (isUniqueConstraintError(error)) {
         throw new ConflictException('Já existe uma conta com este e-mail.');
       }
-      if (this.isNotFoundError(error)) {
+      if (isRecordNotFoundError(error)) {
         throw new NotFoundException('Usuário não encontrado.');
       }
       throw error;
@@ -54,56 +59,39 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado.');
     }
 
-    if (user.roles.includes(role)) {
-      return this.getMe(userId);
-    }
-
-    await this.prisma.$transaction(async (transaction) => {
-      await transaction.user.update({
-        where: { id: userId },
-        data: { roles: { push: role } },
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        // O filtro pelo papel ausente serializa solicitações simultâneas:
+        // a segunda não encontra a linha e não tenta criar o perfil de novo.
+        const updatedUser = await transaction.user.updateMany({
+          where: { id: userId, NOT: { roles: { has: role } } },
+          data: { roles: { push: role } },
+        });
+        if (updatedUser.count !== 1) {
+          return;
+        }
+        if (role === Role.GUEST) {
+          await transaction.guestProfile.create({ data: { userId } });
+        } else {
+          await transaction.ownerProfile.create({ data: { userId } });
+        }
       });
-      if (role === Role.GUEST) {
-        await transaction.guestProfile.create({ data: { userId } });
-      } else {
-        await transaction.ownerProfile.create({ data: { userId } });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
       }
-    });
+    }
 
     return this.getMe(userId);
   }
 
-  private toPublicUser(
+  private withProfiles(
     user: User & { guestProfile?: unknown; ownerProfile?: unknown },
   ) {
     return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      status: user.status,
-      roles: user.roles,
+      ...toPublicUser(user),
       guestProfile: user.guestProfile,
       ownerProfile: user.ownerProfile,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
     };
-  }
-
-  private isUniqueConstraintError(error: unknown): error is { code: string } {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
-    );
-  }
-
-  private isNotFoundError(error: unknown): error is { code: string } {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2025'
-    );
   }
 }
