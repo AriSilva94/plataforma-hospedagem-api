@@ -7,7 +7,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY prisma ./prisma
-RUN npx prisma generate
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build

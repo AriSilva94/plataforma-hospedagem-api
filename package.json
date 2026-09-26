@@ -6,7 +6,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "prebuild": "prisma generate",
     "build": "nest build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "node --env-file=.env ./node_modules/@nestjs/cli/bin/nest.js start",
     "start:dev": "node --env-file=.env ./node_modules/@nestjs/cli/bin/nest.js start --watch",

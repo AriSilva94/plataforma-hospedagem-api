@@ -62,7 +62,7 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npx prisma generate
       - run: npx prisma migrate deploy
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
       - run: npx eslint "{src,apps,libs,test}/**/*.ts"
       - run: npm test -- --runInBand
       - run: node ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand
@@ -117,8 +117,10 @@ jobs:
             "local/backend:$GITHUB_SHA")"
           trap 'docker rm --force "$container_id" >/dev/null' EXIT
           for attempt in $(seq 1 20); do
-            response="$(curl --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:3030/health)" || response=""
-            if jq --exit-status --arg revision "$GITHUB_SHA" '.status == "ok" and .revision == $revision' <<< "$response" > /dev/null 2>&1; then
+            http_response="$(curl --silent --show-error --connect-timeout 2 --max-time 5 --write-out '\n%{http_code}' http://127.0.0.1:3030/health)" || http_response=""
+            http_status="${http_response##*$'\n'}"
+            response="${http_response%$'\n'*}"
+            if [[ "$http_status" == 200 ]] && jq --exit-status --arg revision "$GITHUB_SHA" '.status == "ok" and .revision == $revision' <<< "$response" > /dev/null 2>&1; then
               exit 0
             fi
             if [[ "$attempt" -lt 20 ]]; then
@@ -244,8 +246,10 @@ jobs:
           set -euo pipefail
           url="${HEALTHCHECK_URL%/}/health"
           for attempt in $(seq 1 40); do
-            response="$(curl --silent --show-error --connect-timeout 10 --max-time 15 "$url")" || response=""
-            if jq --exit-status --arg revision "$GITHUB_SHA" '.status == "ok" and .revision == $revision' <<< "$response" > /dev/null 2>&1; then
+            http_response="$(curl --silent --show-error --connect-timeout 10 --max-time 15 --write-out '\n%{http_code}' "$url")" || http_response=""
+            http_status="${http_response##*$'\n'}"
+            response="${http_response%$'\n'*}"
+            if [[ "$http_status" == 200 ]] && jq --exit-status --arg revision "$GITHUB_SHA" '.status == "ok" and .revision == $revision' <<< "$response" > /dev/null 2>&1; then
               exit 0
             fi
             if [[ "$attempt" -lt 40 ]]; then
