@@ -9,14 +9,18 @@ describe('EmailService', () => {
       .spyOn(nodemailer, 'createTransport')
       .mockReturnValue({ sendMail } as never);
     const environmentService = {
+      get: jest.fn(
+        (name: string) =>
+          ({ SMTP_USER: 'auth@arisilva.tech', SMTP_PASSWORD: 'password' })[
+            name
+          ],
+      ),
       getOrThrow: jest.fn(
         (name: string) =>
           ({
             SMTP_HOST: 'smtp.hostinger.com',
             SMTP_PORT: '465',
             SMTP_SECURE: 'true',
-            SMTP_USER: 'auth@arisilva.tech',
-            SMTP_PASSWORD: 'password',
             EMAIL_FROM: 'DOMUS X <auth@arisilva.tech>',
             FRONTEND_URL: 'https://domusx-dev.arisilva.tech',
           })[name],

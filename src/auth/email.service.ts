@@ -7,14 +7,15 @@ export class EmailService {
   constructor(private readonly environmentService: EnvironmentService) {}
 
   async sendPasswordReset(email: string, token: string): Promise<void> {
+    const smtpUser = this.environmentService.get('SMTP_USER');
+    const smtpPassword = this.environmentService.get('SMTP_PASSWORD');
     const transporter = nodemailer.createTransport({
       host: this.environmentService.getOrThrow('SMTP_HOST'),
       port: Number(this.environmentService.getOrThrow('SMTP_PORT')),
       secure: this.environmentService.getOrThrow('SMTP_SECURE') === 'true',
-      auth: {
-        user: this.environmentService.getOrThrow('SMTP_USER'),
-        pass: this.environmentService.getOrThrow('SMTP_PASSWORD'),
-      },
+      ...(smtpUser && smtpPassword
+        ? { auth: { user: smtpUser, pass: smtpPassword } }
+        : {}),
     });
     const frontendUrl = this.environmentService.getOrThrow('FRONTEND_URL');
     const resetUrl = new URL('/redefinir-senha', frontendUrl);
