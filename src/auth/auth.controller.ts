@@ -114,6 +114,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: 'lax' as const,
       secure: this.environmentService.get('NODE_ENV') === 'production',
+      domain: this.environmentService.get('COOKIE_DOMAIN') || undefined,
       path: '/',
     };
   }
