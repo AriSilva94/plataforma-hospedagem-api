@@ -19,19 +19,24 @@ enum UserStatus {
   INACTIVE
 }
 
+enum AuthProvider {
+  GOOGLE
+}
+
 model User {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                String
-  email               String               @unique
-  passwordHash        String               @map("password_hash")
-  status              UserStatus           @default(ACTIVE)
-  roles               Role[]
-  guestProfile        GuestProfile?
-  ownerProfile        OwnerProfile?
-  authSessions        AuthSession[]
-  passwordResetTokens PasswordResetToken[]
-  createdAt           DateTime             @default(now()) @map("created_at")
-  updatedAt           DateTime             @updatedAt @map("updated_at")
+  id                     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String
+  email                  String                 @unique
+  passwordHash           String?                @map("password_hash")
+  status                 UserStatus             @default(ACTIVE)
+  roles                  Role[]
+  guestProfile           GuestProfile?
+  ownerProfile           OwnerProfile?
+  authSessions           AuthSession[]
+  externalAuthIdentities ExternalAuthIdentity[]
+  passwordResetTokens    PasswordResetToken[]
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -68,6 +73,20 @@ model AuthSession {
 
   @@index([userId])
   @@map("auth_sessions")
+}
+
+model ExternalAuthIdentity {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        AuthProvider
+  providerSubject String       @map("provider_subject")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("external_auth_identities")
 }
 
 model PasswordResetToken {

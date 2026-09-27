@@ -48,12 +48,14 @@ describe('AuthService', () => {
     };
   }
 
-  it('cria um usuário com o perfil inicial e uma sessão', async () => {
+  it('cria um usuário sem perfil inicial e uma sessão', async () => {
     const { service, prisma, tokens } = createService();
+    const registeredUser = { ...user, roles: [] };
+    const createUser = jest.fn().mockResolvedValue(registeredUser);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.$transaction.mockImplementation(
       (callback: (tx: unknown) => unknown) =>
-        callback({ user: { create: jest.fn().mockResolvedValue(user) } }),
+        callback({ user: { create: createUser } }),
     );
     tokens.createSession.mockResolvedValue({
       accessToken: 'access',
@@ -65,12 +67,20 @@ describe('AuthService', () => {
         name: user.name,
         email: user.email,
         password: 'a-safe-password',
-        role: 'GUEST',
       }),
     ).resolves.toMatchObject({
-      user: { email: user.email },
+      user: { email: user.email, roles: [] },
       accessToken: 'access',
     });
+    expect(createUser).toHaveBeenCalledWith({
+      data: {
+        name: user.name,
+        email: user.email,
+        passwordHash: 'hashed-password',
+        roles: [],
+      },
+    });
+    expect(tokens.createSession).toHaveBeenCalledWith(registeredUser);
   });
 
   it('não cria duas contas para o mesmo e-mail', async () => {
@@ -82,7 +92,6 @@ describe('AuthService', () => {
         name: user.name,
         email: user.email,
         password: 'a-safe-password',
-        role: 'GUEST',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
@@ -95,5 +104,17 @@ describe('AuthService', () => {
     await expect(
       service.login({ email: user.email, password: 'wrong-password' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejeita login de conta sem senha sem verificar a senha', async () => {
+    const { service, prisma, passwordService } = createService();
+    prisma.user.findUnique.mockResolvedValue({ ...user, passwordHash: null });
+    const verifyPassword = jest.fn();
+    passwordService.verify = verifyPassword;
+
+    await expect(
+      service.login({ email: user.email, password: 'a-safe-password' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(verifyPassword).not.toHaveBeenCalled();
   });
 });

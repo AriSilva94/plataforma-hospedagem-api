@@ -42,7 +42,6 @@ describe('Segurança de autenticação (e2e)', () => {
       name: 'Teste de segurança',
       email: `review-${randomUUID()}@example.com`,
       password,
-      role: 'GUEST',
     });
     userIds.push(result.user.id);
     return result;
@@ -122,7 +121,7 @@ describe('Segurança de autenticação (e2e)', () => {
         expect(body).toMatchObject({
           name: 'Nome atualizado',
           email: session.user.email,
-          roles: ['GUEST'],
+          roles: [],
         });
         expect(body).not.toHaveProperty('passwordHash');
       });
@@ -141,7 +140,7 @@ describe('Segurança de autenticação (e2e)', () => {
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: session.user.id },
     });
-    expect(user.roles).toEqual(['GUEST', 'OWNER']);
+    expect(user.roles).toEqual(['OWNER']);
     expect(
       await prisma.ownerProfile.count({ where: { userId: user.id } }),
     ).toBe(1);
