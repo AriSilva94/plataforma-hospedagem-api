@@ -8,6 +8,11 @@ import { AppModule } from './../src/app.module';
 
 describe('Health endpoint (e2e)', () => {
   let app: INestApplication<App>;
+  const originalRevision = process.env.APP_REVISION;
+
+  beforeAll(() => {
+    process.env.APP_REVISION = 'test-revision';
+  });
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -23,7 +28,8 @@ describe('Health endpoint (e2e)', () => {
     return request(app.getHttpServer())
       .get('/health')
       .expect(200)
-      .expect({ status: 'ok' });
+      .expect('Cache-Control', 'no-store')
+      .expect({ status: 'ok', revision: 'test-revision' });
   });
 
   it('cadastra um hóspede e permite consultar o próprio perfil', async () => {
@@ -58,6 +64,14 @@ describe('Health endpoint (e2e)', () => {
   afterEach(async () => {
     if (app) {
       await app.close();
+    }
+  });
+
+  afterAll(() => {
+    if (originalRevision === undefined) {
+      delete process.env.APP_REVISION;
+    } else {
+      process.env.APP_REVISION = originalRevision;
     }
   });
 });

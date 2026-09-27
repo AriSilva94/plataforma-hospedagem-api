@@ -11,6 +11,7 @@ export class EnvironmentService {
       'FRONTEND_URL',
       'SMTP_HOST',
       'SMTP_PORT',
+      'SMTP_SECURE',
       'EMAIL_FROM',
     ];
     for (const name of required) {
