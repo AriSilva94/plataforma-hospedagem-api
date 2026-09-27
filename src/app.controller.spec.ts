@@ -14,7 +14,17 @@ describe('AppController', () => {
 
   describe('health', () => {
     it('returns the service health status', () => {
-      expect(appController.getHealth()).toEqual({ status: 'ok' });
+      const originalRevision = process.env.APP_REVISION;
+      process.env.APP_REVISION = 'test-revision';
+      expect(appController.getHealth()).toEqual({
+        status: 'ok',
+        revision: 'test-revision',
+      });
+      if (originalRevision === undefined) {
+        delete process.env.APP_REVISION;
+      } else {
+        process.env.APP_REVISION = originalRevision;
+      }
     });
   });
 });
