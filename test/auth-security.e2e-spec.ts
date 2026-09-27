@@ -9,6 +9,7 @@ import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { EmailService } from '../src/auth/email.service';
 import { TokenService } from '../src/auth/token.service';
+import { GoogleAuthService } from '../src/auth/google-auth.service';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../src/infrastructure/redis/redis.module';
 import { RedisThrottlerStorage } from '../src/infrastructure/redis/redis-throttler.storage';
@@ -68,6 +69,38 @@ describe('Segurança de autenticação (e2e)', () => {
         status: 'ACTIVE',
       })
       .expect(400);
+  });
+
+  it('recusa callback Google para usuário inativo sem emitir sessão', async () => {
+    const session = await account();
+    const user = await prisma.user.update({
+      where: { id: session.user.id },
+      data: { status: 'INACTIVE' },
+    });
+    const googleAuth = app.get(GoogleAuthService);
+    const callback = jest
+      .spyOn(googleAuth, 'authenticateCallback')
+      .mockResolvedValueOnce(user);
+
+    try {
+      const response = await request(app.getHttpServer())
+        .get('/auth/google/callback?code=code&state=expected')
+        .set('Cookie', 'oauth_google_state=expected; oauth_google_nonce=nonce')
+        .expect(302);
+
+      expect(response.headers.location).toBe(
+        `${process.env.FRONTEND_URL}/login?error=google-auth`,
+      );
+      expect(response.headers['set-cookie']).toHaveLength(2);
+      expect(response.headers['set-cookie']).not.toEqual(
+        expect.arrayContaining([expect.stringContaining('access_token=')]),
+      );
+      expect(
+        await prisma.authSession.count({ where: { userId: user.id } }),
+      ).toBe(1);
+    } finally {
+      callback.mockRestore();
+    }
   });
 
   it('mantém contador temporário e bloqueia requisições concorrentes no Redis', async () => {
