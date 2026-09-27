@@ -195,9 +195,80 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
-  deploy:
-    if: github.event_name != 'pull_request'
+  migrate-staging:
+    if: github.event_name != 'pull_request' && github.ref_name == 'release/separate-steps'
     needs: [build-and-push, scan-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: staging
+    env:
+      IMAGE: ${{ needs.build-and-push.outputs.image }}
+      IMAGE_DIGEST: ${{ needs.build-and-push.outputs.digest }}
+      SSH_HOST: ${{ vars.DOKPLOY_SSH_HOST }}
+      SSH_USER: ${{ vars.DOKPLOY_SSH_USER }}
+      DOCKER_NETWORK: ${{ vars.DOKPLOY_DOCKER_NETWORK }}
+      BACKEND_SERVICE: ${{ vars.DOKPLOY_BACKEND_SERVICE }}
+      SSH_KEY: ${{ secrets.DOKPLOY_SSH_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.DOKPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Validate migration connection configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE"
+          test -n "$IMAGE_DIGEST"
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$DOCKER_NETWORK"
+          test -n "$BACKEND_SERVICE"
+          test -n "$SSH_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+      - name: Run staging database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(
+            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts"
+            -o ConnectTimeout=15
+          )
+          ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- \
+            "$IMAGE" "$IMAGE_DIGEST" "$DOCKER_NETWORK" "$BACKEND_SERVICE" <<'REMOTE'
+          set -euo pipefail
+          image="$1"
+          digest="$2"
+          network="$3"
+          service="$4"
+          image_ref="$image@$digest"
+          database_url="$(docker service inspect "$service" --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' | awk -F= '$1 == "DATABASE_URL" { sub(/^[^=]*=/, ""); print; exit }')"
+          test -n "$database_url"
+          env_file="$(mktemp)"
+          trap 'rm -f "$env_file"' EXIT
+          printf 'DATABASE_URL=%s\n' "$database_url" > "$env_file"
+          docker pull "$image_ref" >/dev/null
+          docker run --rm --network "$network" --env-file "$env_file" "$image_ref" ./node_modules/.bin/prisma migrate deploy
+          REMOTE
+
+  deploy:
+    if: >-
+      always() && github.event_name != 'pull_request' &&
+      needs.build-and-push.result == 'success' &&
+      needs.scan-image.result == 'success' &&
+      (needs.migrate-staging.result == 'success' || needs.migrate-staging.result == 'skipped')
+    needs: [build-and-push, scan-image, migrate-staging]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -220,6 +291,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${{ needs.migrate-staging.result }}" != "success" && "${{ needs.migrate-staging.result }}" != "skipped" ]]; then
+            echo "A migration de staging não foi concluída; o deploy foi bloqueado."
+            exit 1
+          fi
           case "$GITHUB_REF_NAME" in
             develop) tag=dev ;;
             release/separate-steps) tag=staging ;;
