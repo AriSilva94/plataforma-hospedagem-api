@@ -10,7 +10,11 @@ export class EmailService {
     const transporter = nodemailer.createTransport({
       host: this.environmentService.getOrThrow('SMTP_HOST'),
       port: Number(this.environmentService.getOrThrow('SMTP_PORT')),
-      secure: false,
+      secure: this.environmentService.getOrThrow('SMTP_SECURE') === 'true',
+      auth: {
+        user: this.environmentService.getOrThrow('SMTP_USER'),
+        pass: this.environmentService.getOrThrow('SMTP_PASSWORD'),
+      },
     });
     const frontendUrl = this.environmentService.getOrThrow('FRONTEND_URL');
     const resetUrl = new URL('/redefinir-senha', frontendUrl);
