@@ -13,6 +13,9 @@ export class EnvironmentService {
       'SMTP_PORT',
       'SMTP_SECURE',
       'EMAIL_FROM',
+      'GOOGLE_CLIENT_ID',
+      'GOOGLE_CLIENT_SECRET',
+      'GOOGLE_CALLBACK_URL',
     ];
     for (const name of required) {
       this.getOrThrow(name);

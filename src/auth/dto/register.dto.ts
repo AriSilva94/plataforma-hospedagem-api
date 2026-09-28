@@ -1,10 +1,4 @@
-import {
-  IsEmail,
-  IsEnum,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 import { NormalizeEmail, Trim } from '../../common/transforms';
 
 export class RegisterDto {
@@ -22,7 +16,4 @@ export class RegisterDto {
   @MinLength(12)
   @MaxLength(128)
   password!: string;
-
-  @IsEnum(['GUEST', 'OWNER'])
-  role!: 'GUEST' | 'OWNER';
 }

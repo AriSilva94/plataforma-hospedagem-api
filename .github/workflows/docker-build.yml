@@ -54,6 +54,9 @@ jobs:
       SMTP_PORT: '1025'
       SMTP_SECURE: 'false'
       EMAIL_FROM: no-reply@localhost
+      GOOGLE_CLIENT_ID: test-google-client-id
+      GOOGLE_CLIENT_SECRET: test-google-client-secret
+      GOOGLE_CALLBACK_URL: http://localhost:3030/auth/google/callback
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -117,6 +120,7 @@ jobs:
             -e ACCESS_TOKEN_SECRET='test-access-secret-long-enough-for-ci' \
             -e REFRESH_TOKEN_SECRET='test-refresh-secret-long-enough-for-ci' \
             -e SMTP_HOST='localhost' -e SMTP_PORT='1025' -e SMTP_SECURE='false' -e EMAIL_FROM='no-reply@localhost' \
+            -e GOOGLE_CLIENT_ID='test-google-client-id' -e GOOGLE_CLIENT_SECRET='test-google-client-secret' -e GOOGLE_CALLBACK_URL='http://localhost:3030/auth/google/callback' \
             "local/backend:$GITHUB_SHA")"
           trap 'docker rm --force "$container_id" >/dev/null' EXIT
           for attempt in $(seq 1 20); do

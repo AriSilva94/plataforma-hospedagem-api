@@ -3,7 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Role, User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';
@@ -45,10 +45,7 @@ export class AuthService {
             name: dto.name,
             email: dto.email,
             passwordHash,
-            roles: [dto.role],
-            ...(dto.role === Role.GUEST
-              ? { guestProfile: { create: {} } }
-              : { ownerProfile: { create: {} } }),
+            roles: [],
           },
         }),
       );
@@ -67,7 +64,7 @@ export class AuthService {
       where: { email: dto.email },
     });
     const isValidPassword =
-      user &&
+      user?.passwordHash &&
       (await this.passwordService.verify(user.passwordHash, dto.password));
 
     if (!isValidPassword || user.status !== 'ACTIVE') {

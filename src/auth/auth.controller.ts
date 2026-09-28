@@ -1,4 +1,13 @@
-import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -8,13 +17,62 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import { GoogleAuthService } from './google-auth.service';
+import { TokenService } from './token.service';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly environmentService: EnvironmentService,
+    private readonly googleAuthService: GoogleAuthService,
+    private readonly tokenService: TokenService,
   ) {}
+
+  @Get('google')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  google(@Res() response: Response) {
+    const state = randomBytes(32).toString('base64url');
+    const nonce = randomBytes(32).toString('base64url');
+    response.cookie('oauth_google_state', state, this.oauthCookieOptions());
+    response.cookie('oauth_google_nonce', nonce, this.oauthCookieOptions());
+    response.redirect(this.googleAuthService.authorizationUrl(state, nonce));
+  }
+
+  @Get('google/callback')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async googleCallback(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Req() request: Request,
+    @Res() response: Response,
+  ) {
+    const expectedState = this.getCookie(request, 'oauth_google_state');
+    const nonce = this.getCookie(request, 'oauth_google_nonce');
+    response.clearCookie('oauth_google_state', this.oauthCookieOptions());
+    response.clearCookie('oauth_google_nonce', this.oauthCookieOptions());
+    if (error || !code || !nonce || !this.sameValue(state, expectedState)) {
+      return response.redirect(this.googleErrorUrl());
+    }
+    try {
+      const user = await this.googleAuthService.authenticateCallback(
+        code,
+        nonce,
+      );
+      if (user.status !== 'ACTIVE') {
+        return response.redirect(this.googleErrorUrl());
+      }
+      const tokens = await this.tokenService.createSession(user);
+      this.setSessionCookies(response, tokens);
+      return response.redirect(
+        `${this.environmentService.getOrThrow('FRONTEND_URL')}${user.roles.length === 0 ? '/perfil' : '/'}`,
+      );
+    } catch {
+      return response.redirect(this.googleErrorUrl());
+    }
+  }
 
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -117,6 +175,27 @@ export class AuthController {
       domain: this.environmentService.get('COOKIE_DOMAIN') || undefined,
       path: '/',
     };
+  }
+
+  private oauthCookieOptions() {
+    return { ...this.cookieOptions(), maxAge: 10 * 60 * 1000 };
+  }
+
+  private googleErrorUrl(): string {
+    return `${this.environmentService.getOrThrow('FRONTEND_URL')}/login?error=google-auth`;
+  }
+
+  private sameValue(
+    value: string | undefined,
+    expected: string | undefined,
+  ): boolean {
+    if (typeof value !== 'string' || !value || !expected) return false;
+    const actualBytes = Buffer.from(value);
+    const expectedBytes = Buffer.from(expected);
+    return (
+      actualBytes.length === expectedBytes.length &&
+      timingSafeEqual(actualBytes, expectedBytes)
+    );
   }
 
   private getCookie(request: Request, name: string): string | undefined {

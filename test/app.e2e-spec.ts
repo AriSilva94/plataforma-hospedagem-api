@@ -32,16 +32,15 @@ describe('Health endpoint (e2e)', () => {
       .expect({ status: 'ok', revision: 'test-revision' });
   });
 
-  it('cadastra um hóspede e permite consultar o próprio perfil', async () => {
-    const email = `guest-${randomUUID()}@example.com`;
+  it('cadastra uma conta sem perfil e permite consultá-la', async () => {
+    const email = `user-${randomUUID()}@example.com`;
 
     const registration = await request(app.getHttpServer())
       .post('/auth/register')
       .send({
-        name: 'Hóspede de teste',
+        name: 'Usuário de teste',
         email,
         password: 'uma-senha-segura',
-        role: 'GUEST',
       })
       .expect(201);
 
@@ -56,7 +55,7 @@ describe('Health endpoint (e2e)', () => {
       .set('Cookie', cookieHeader)
       .expect(200)
       .expect(({ body }: { body: unknown }) => {
-        expect(body).toMatchObject({ email, roles: ['GUEST'] });
+        expect(body).toMatchObject({ email, roles: [] });
         expect(body).not.toHaveProperty('passwordHash');
       });
   });
