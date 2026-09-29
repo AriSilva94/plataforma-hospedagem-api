@@ -71,7 +71,6 @@ function parseResult(value: unknown): [number, number, number, number] {
   return [value[0], value[1], value[2], value[3]];
 }
 
-// O throttler publica esses valores em Retry-After e X-RateLimit-Reset, que são segundos.
 function toSeconds(milliseconds: number): number {
   return milliseconds > 0 ? Math.ceil(milliseconds / 1000) : 0;
 }
