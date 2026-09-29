@@ -1,5 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthProvider } from '@prisma/client';
+import { AuthProvider } from '../generated/prisma/client';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createRemoteJWKSet } from 'jose';
 import { GoogleAuthService } from './google-auth.service';

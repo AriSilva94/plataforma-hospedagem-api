@@ -3,7 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { User } from '@prisma/client';
+import { User } from '../generated/prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';

@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { AuthProvider, User } from '@prisma/client';
+import { AuthProvider, User } from '../generated/prisma/client';
 import { isEmail } from 'class-validator';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';

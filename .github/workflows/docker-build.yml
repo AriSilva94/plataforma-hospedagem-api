@@ -71,7 +71,7 @@ jobs:
       - run: npm run typecheck
       - run: npx eslint "{src,apps,libs,test}/**/*.ts"
       - run: npm test -- --runInBand
-      - run: node ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand
+      - run: node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand
       - run: npm run build
 
   verify-image:
@@ -108,7 +108,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint node "local/backend:$GITHUB_SHA" -e "require('@prisma/client'); require('fs').accessSync('node_modules/.prisma/client/default.js')"
+          docker run --rm --entrypoint node "local/backend:$GITHUB_SHA" -e "require('./dist/generated/prisma/client'); require('@prisma/adapter-pg')"
           docker run --rm --network host \
             -e DATABASE_URL='postgresql://test:test@127.0.0.1:5432/backend_test?schema=public' \
             --entrypoint ./node_modules/.bin/prisma \
