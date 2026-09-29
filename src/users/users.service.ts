@@ -61,8 +61,6 @@ export class UsersService {
 
     try {
       await this.prisma.$transaction(async (transaction) => {
-        // O filtro pelo papel ausente serializa solicitações simultâneas:
-        // a segunda não encontra a linha e não tenta criar o perfil de novo.
         const updatedUser = await transaction.user.updateMany({
           where: { id: userId, NOT: { roles: { has: role } } },
           data: { roles: { push: role } },
