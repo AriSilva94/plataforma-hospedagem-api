@@ -109,7 +109,6 @@ describe('Segurança de autenticação (e2e)', () => {
     const key = randomUUID();
     const baseKey = `throttle:review:${key}`;
     try {
-      // Reproduz interrupção entre INCR e PEXPIRE da implementação anterior.
       await redis.set(baseKey, '1');
       const result = await storage.increment(key, 60000, 3, 60000, 'review');
       expect(result.timeToExpire).toBeGreaterThan(0);

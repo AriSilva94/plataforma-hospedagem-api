@@ -24,8 +24,6 @@ export type AuthenticatedUser = { id: string; roles: Role[] };
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_MAX_AGE_DAYS = 90;
-// Requisições paralelas (prefetch, abas) podem apresentar o refresh token que
-// acabou de ser rotacionado; dentro desta janela isso não é tratado como roubo.
 const ROTATION_GRACE_MS = 60 * 1000;
 
 @Injectable()
@@ -73,8 +71,6 @@ export class TokenService {
     };
   }
 
-  // O access token só autoriza enquanto a sessão que o emitiu continuar ativa,
-  // para que logout e redefinição de senha revoguem o acesso imediatamente.
   async authenticate(accessToken: string): Promise<AuthenticatedUser> {
     const payload = this.verifyAccessToken(accessToken);
     const session = await this.prisma.authSession.findUnique({
@@ -168,8 +164,6 @@ export class TokenService {
     });
   }
 
-  // Um refresh token já rotacionado fora da janela de tolerância indica que
-  // outra parte possui uma cópia; toda a cadeia de sessões do login é revogada.
   private async grantFromReplacedSession(
     sessionId: string,
   ): Promise<AccessGrant> {

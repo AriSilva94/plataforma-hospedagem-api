@@ -112,7 +112,6 @@ export class AuthController {
     return { authenticated: true };
   }
 
-  // Sem guard: encerrar a sessão precisa funcionar mesmo com o access token expirado.
   @Post('logout')
   @HttpCode(204)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
