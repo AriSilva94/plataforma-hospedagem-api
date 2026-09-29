@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { Prisma, Role, UserStatus } from '@prisma/client';
+import { Prisma, Role, UserStatus } from '../generated/prisma/client';
 import { randomUUID } from 'crypto';
 import { JwtPayload, SignOptions, decode, sign, verify } from 'jsonwebtoken';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
