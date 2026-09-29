@@ -48,7 +48,7 @@ jobs:
       ACCESS_TOKEN_SECRET: test-access-secret-long-enough-for-ci
       REFRESH_TOKEN_SECRET: test-refresh-secret-long-enough-for-ci
       ACCESS_TOKEN_TTL: 15m
-      REFRESH_TOKEN_TTL: 30d
+      SESSION_MAX_AGE_DAYS: '90'
       REFRESH_TOKEN_TTL_DAYS: '30'
       SMTP_HOST: localhost
       SMTP_PORT: '1025'

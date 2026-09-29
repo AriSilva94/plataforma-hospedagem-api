@@ -12,7 +12,13 @@ import { TokenService } from './token.service';
 describe('AuthController session cookies', () => {
   let app: INestApplication<App>;
   let domain: string | undefined;
-  const tokens = { accessToken: 'access', refreshToken: 'refresh' };
+  const tokens = {
+    accessToken: 'access',
+    accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    refreshToken: 'refresh',
+    refreshTokenExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  };
+  const refresh = jest.fn();
   const authorizationUrl = jest.fn(
     (state: string, nonce: string) =>
       `https://accounts.google.com/o/oauth2/v2/auth?state=${state}&nonce=${nonce}`,
@@ -29,7 +35,7 @@ describe('AuthController session cookies', () => {
           useValue: {
             login: jest.fn().mockResolvedValue({ ...tokens, user: {} }),
             register: jest.fn().mockResolvedValue({ ...tokens, user: {} }),
-            refresh: jest.fn().mockResolvedValue(tokens),
+            refresh,
             logout: jest.fn().mockResolvedValue(undefined),
           },
         },
@@ -60,6 +66,7 @@ describe('AuthController session cookies', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    refresh.mockResolvedValue(tokens);
     domain = undefined;
   });
 
@@ -101,6 +108,35 @@ describe('AuthController session cookies', () => {
       }
     },
   );
+
+  it('expira os cookies junto com os tokens emitidos', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({});
+    const [accessCookie, refreshCookie] = response.headers[
+      'set-cookie'
+    ] as unknown as string[];
+
+    expect(maxAge(accessCookie)).toBeGreaterThan(15 * 60 - 5);
+    expect(maxAge(accessCookie)).toBeLessThanOrEqual(15 * 60);
+    expect(maxAge(refreshCookie)).toBeGreaterThan(30 * 24 * 60 * 60 - 5);
+    expect(maxAge(refreshCookie)).toBeLessThanOrEqual(30 * 24 * 60 * 60);
+  });
+
+  it('renova somente o access token quando a rotação já ocorreu em paralelo', async () => {
+    refresh.mockResolvedValue({
+      accessToken: 'access',
+      accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+    });
+    const response = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Cookie', 'refresh_token=refresh')
+      .expect(200, { authenticated: true });
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatch(/^access_token=access;/);
+  });
 
   it('inicia Google Auth com state e nonce em cookies seguros de dez minutos', async () => {
     domain = 'example.com';
@@ -257,4 +293,8 @@ describe('AuthController session cookies', () => {
     );
     expect(response.headers['set-cookie']).toHaveLength(2);
   });
+
+  function maxAge(cookie: string): number {
+    return Number(cookie.match(/Max-Age=(\d+)/)?.[1]);
+  }
 });

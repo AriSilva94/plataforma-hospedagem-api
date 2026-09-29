@@ -14,7 +14,7 @@ import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from './email.service';
 import { PasswordService } from './password.service';
-import { AuthTokens, TokenService } from './token.service';
+import { AccessGrant, AuthTokens, TokenService } from './token.service';
 
 export type AuthResult = AuthTokens & { user: PublicUser };
 
@@ -144,7 +144,7 @@ export class AuthService {
     });
   }
 
-  async refresh(refreshToken: string): Promise<AuthTokens> {
+  async refresh(refreshToken: string): Promise<AuthTokens | AccessGrant> {
     return this.tokenService.rotateSession(refreshToken);
   }
 
