@@ -62,16 +62,20 @@ model OwnerProfile {
 }
 
 model AuthSession {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String   @map("user_id") @db.Uuid
-  refreshTokenHash String   @map("refresh_token_hash")
-  expiresAt        DateTime @map("expires_at")
-  revokedAt        DateTime? @map("revoked_at")
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  familyId            String    @map("family_id") @db.Uuid
+  refreshTokenHash    String    @map("refresh_token_hash")
+  expiresAt           DateTime  @map("expires_at")
+  absoluteExpiresAt   DateTime  @map("absolute_expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  replacedBySessionId String?   @map("replaced_by_session_id") @db.Uuid
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@index([userId])
+  @@index([familyId])
   @@map("auth_sessions")
 }
 

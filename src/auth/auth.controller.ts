@@ -19,7 +19,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { GoogleAuthService } from './google-auth.service';
-import { TokenService } from './token.service';
+import { AccessGrant, AuthTokens, TokenService } from './token.service';
 
 @Controller('auth')
 export class AuthController {
@@ -150,21 +150,18 @@ export class AuthController {
 
   private setSessionCookies(
     response: Response,
-    tokens: { accessToken: string; refreshToken: string },
+    tokens: AuthTokens | AccessGrant,
   ): void {
     response.cookie('access_token', tokens.accessToken, {
       ...this.cookieOptions(),
-      maxAge: 15 * 60 * 1000,
+      maxAge: tokens.accessTokenExpiresAt.getTime() - Date.now(),
     });
-    response.cookie('refresh_token', tokens.refreshToken, {
-      ...this.cookieOptions(),
-      maxAge:
-        Number(this.environmentService.getOrThrow('REFRESH_TOKEN_TTL_DAYS')) *
-        24 *
-        60 *
-        60 *
-        1000,
-    });
+    if ('refreshToken' in tokens) {
+      response.cookie('refresh_token', tokens.refreshToken, {
+        ...this.cookieOptions(),
+        maxAge: tokens.refreshTokenExpiresAt.getTime() - Date.now(),
+      });
+    }
   }
 
   private cookieOptions() {

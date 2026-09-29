@@ -1,22 +1,32 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { JwtPayload, SignOptions, sign, verify } from 'jsonwebtoken';
+import { JwtPayload, SignOptions, decode, sign, verify } from 'jsonwebtoken';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 import { PasswordService } from './password.service';
 
-type AccessPayload = { sub: string; sessionId: string };
-type RefreshPayload = { sub: string; sessionId: string };
+type TokenPayload = { sub: string; sessionId: string };
 type SessionUser = { id: string; roles: Role[]; status: UserStatus };
 type SessionState = {
   revokedAt: Date | null;
   expiresAt: Date;
   user: SessionUser;
 };
+type SessionLineage = { familyId: string; absoluteExpiresAt: Date };
 
-export type AuthTokens = { accessToken: string; refreshToken: string };
+export type AccessGrant = { accessToken: string; accessTokenExpiresAt: Date };
+export type AuthTokens = AccessGrant & {
+  refreshToken: string;
+  refreshTokenExpiresAt: Date;
+};
 export type AuthenticatedUser = { id: string; roles: Role[] };
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_SESSION_MAX_AGE_DAYS = 90;
+// Requisições paralelas (prefetch, abas) podem apresentar o refresh token que
+// acabou de ser rotacionado; dentro desta janela isso não é tratado como roubo.
+const ROTATION_GRACE_MS = 60 * 1000;
 
 @Injectable()
 export class TokenService {
@@ -32,19 +42,35 @@ export class TokenService {
       roles: Role[];
     },
     transaction: Prisma.TransactionClient = this.prisma,
+    lineage: SessionLineage = this.newLineage(),
+    sessionId: string = randomUUID(),
   ): Promise<AuthTokens> {
-    const sessionId = randomUUID();
-    const refreshToken = this.signRefreshToken(user.id, sessionId);
-    const accessToken = this.signAccessToken(user, sessionId);
+    const refreshTokenExpiresAt = new Date(
+      Math.min(
+        Date.now() + this.idleTtlDays() * DAY_IN_MS,
+        lineage.absoluteExpiresAt.getTime(),
+      ),
+    );
+    const refreshToken = this.signRefreshToken(
+      user.id,
+      sessionId,
+      refreshTokenExpiresAt,
+    );
     await transaction.authSession.create({
       data: {
         id: sessionId,
         userId: user.id,
+        familyId: lineage.familyId,
         refreshTokenHash: await this.passwordService.hash(refreshToken),
-        expiresAt: this.refreshExpiration(),
+        expiresAt: refreshTokenExpiresAt,
+        absoluteExpiresAt: lineage.absoluteExpiresAt,
       },
     });
-    return { accessToken, refreshToken };
+    return {
+      ...this.signAccessToken(user.id, sessionId),
+      refreshToken,
+      refreshTokenExpiresAt,
+    };
   }
 
   // O access token só autoriza enquanto a sessão que o emitiu continuar ativa,
@@ -65,7 +91,7 @@ export class TokenService {
     return { id: session.user.id, roles: session.user.roles };
   }
 
-  async rotateSession(refreshToken: string): Promise<AuthTokens> {
+  async rotateSession(refreshToken: string): Promise<AuthTokens | AccessGrant> {
     const payload = this.verifyRefreshToken(refreshToken);
     const session = await this.prisma.authSession.findUnique({
       where: { id: payload.sessionId },
@@ -73,8 +99,9 @@ export class TokenService {
     });
 
     if (
-      !this.isActiveSession(session) ||
+      !session ||
       session.user.id !== payload.sub ||
+      session.user.status !== UserStatus.ACTIVE ||
       !(await this.passwordService.verify(
         session.refreshTokenHash,
         refreshToken,
@@ -83,16 +110,14 @@ export class TokenService {
       throw new UnauthorizedException('Sessão inválida.');
     }
 
-    return this.prisma.$transaction(async (transaction) => {
-      const revokedSession = await transaction.authSession.updateMany({
-        where: { id: session.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      if (revokedSession.count !== 1) {
-        throw new UnauthorizedException('Sessão inválida.');
+    if (this.isActiveSession(session)) {
+      const rotated = await this.replaceSession(session);
+      if (rotated) {
+        return rotated;
       }
-      return this.createSession(session.user, transaction);
-    });
+    }
+
+    return this.grantFromReplacedSession(session.id);
   }
 
   async revokeSession(refreshToken: string | undefined): Promise<void> {
@@ -107,8 +132,74 @@ export class TokenService {
       return;
     }
 
+    const session = await this.prisma.authSession.findUnique({
+      where: { id: sessionId },
+      select: { familyId: true },
+    });
+    if (session) {
+      await this.revokeFamily(session.familyId);
+    }
+  }
+
+  private replaceSession(session: {
+    id: string;
+    familyId: string;
+    absoluteExpiresAt: Date;
+    user: { id: string; roles: Role[] };
+  }): Promise<AuthTokens | null> {
+    const successorId = randomUUID();
+    return this.prisma.$transaction(async (transaction) => {
+      const revokedSession = await transaction.authSession.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: new Date(), replacedBySessionId: successorId },
+      });
+      if (revokedSession.count !== 1) {
+        return null;
+      }
+      return this.createSession(
+        session.user,
+        transaction,
+        {
+          familyId: session.familyId,
+          absoluteExpiresAt: session.absoluteExpiresAt,
+        },
+        successorId,
+      );
+    });
+  }
+
+  // Um refresh token já rotacionado fora da janela de tolerância indica que
+  // outra parte possui uma cópia; toda a cadeia de sessões do login é revogada.
+  private async grantFromReplacedSession(
+    sessionId: string,
+  ): Promise<AccessGrant> {
+    const session = await this.prisma.authSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session?.replacedBySessionId || !session.revokedAt) {
+      throw new UnauthorizedException('Sessão inválida.');
+    }
+
+    if (session.revokedAt.getTime() < Date.now() - ROTATION_GRACE_MS) {
+      await this.revokeFamily(session.familyId);
+      throw new UnauthorizedException('Sessão inválida.');
+    }
+
+    const successor = await this.prisma.authSession.findUnique({
+      where: { id: session.replacedBySessionId },
+      include: { user: true },
+    });
+    if (!this.isActiveSession(successor)) {
+      throw new UnauthorizedException('Sessão inválida.');
+    }
+
+    return this.signAccessToken(successor.user.id, successor.id);
+  }
+
+  private async revokeFamily(familyId: string): Promise<void> {
     await this.prisma.authSession.updateMany({
-      where: { id: sessionId, revokedAt: null },
+      where: { familyId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
@@ -124,36 +215,47 @@ export class TokenService {
     );
   }
 
-  private signAccessToken(
-    user: { id: string; roles: Role[] },
-    sessionId: string,
-  ): string {
-    return sign({ sub: user.id, sessionId }, this.accessSecret(), {
+  private newLineage(): SessionLineage {
+    return {
+      familyId: randomUUID(),
+      absoluteExpiresAt: new Date(Date.now() + this.maxAgeDays() * DAY_IN_MS),
+    };
+  }
+
+  private signAccessToken(userId: string, sessionId: string): AccessGrant {
+    const accessToken = sign({ sub: userId, sessionId }, this.accessSecret(), {
       expiresIn: this.environmentService.getOrThrow(
         'ACCESS_TOKEN_TTL',
       ) as SignOptions['expiresIn'],
     });
+    const { exp } = decode(accessToken) as JwtPayload & { exp: number };
+    return {
+      accessToken,
+      accessTokenExpiresAt: new Date(exp * 1000),
+    };
   }
 
-  private signRefreshToken(userId: string, sessionId: string): string {
+  private signRefreshToken(
+    userId: string,
+    sessionId: string,
+    expiresAt: Date,
+  ): string {
     return sign(
-      { sub: userId, sessionId },
-      this.environmentService.getOrThrow('REFRESH_TOKEN_SECRET'),
-      { expiresIn: this.refreshTtl() as SignOptions['expiresIn'] },
+      {
+        sub: userId,
+        sessionId,
+        exp: Math.floor(expiresAt.getTime() / 1000),
+      },
+      this.refreshSecret(),
     );
   }
 
-  private verifyAccessToken(token: string): AccessPayload {
-    return this.toAccessPayload(this.verifyToken(token, this.accessSecret()));
+  private verifyAccessToken(token: string): TokenPayload {
+    return this.toTokenPayload(this.verifyToken(token, this.accessSecret()));
   }
 
-  private verifyRefreshToken(token: string): RefreshPayload {
-    return this.toRefreshPayload(
-      this.verifyToken(
-        token,
-        this.environmentService.getOrThrow('REFRESH_TOKEN_SECRET'),
-      ),
-    );
+  private verifyRefreshToken(token: string): TokenPayload {
+    return this.toTokenPayload(this.verifyToken(token, this.refreshSecret()));
   }
 
   private verifyToken(token: string, secret: string): string | JwtPayload {
@@ -168,32 +270,22 @@ export class TokenService {
     return this.environmentService.getOrThrow('ACCESS_TOKEN_SECRET');
   }
 
-  private refreshTtl(): string {
-    return this.environmentService.getOrThrow('REFRESH_TOKEN_TTL');
+  private refreshSecret(): string {
+    return this.environmentService.getOrThrow('REFRESH_TOKEN_SECRET');
   }
 
-  private refreshExpiration(): Date {
-    const days = Number(
-      this.environmentService.getOrThrow('REFRESH_TOKEN_TTL_DAYS'),
+  private idleTtlDays(): number {
+    return Number(this.environmentService.getOrThrow('REFRESH_TOKEN_TTL_DAYS'));
+  }
+
+  private maxAgeDays(): number {
+    return Number(
+      this.environmentService.get('SESSION_MAX_AGE_DAYS') ??
+        DEFAULT_SESSION_MAX_AGE_DAYS,
     );
-    return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   }
 
-  private toAccessPayload(payload: string | JwtPayload): AccessPayload {
-    if (
-      typeof payload === 'string' ||
-      typeof payload.sub !== 'string' ||
-      typeof payload.sessionId !== 'string'
-    ) {
-      throw new UnauthorizedException('Token inválido.');
-    }
-    return {
-      sub: payload.sub,
-      sessionId: payload.sessionId,
-    };
-  }
-
-  private toRefreshPayload(payload: string | JwtPayload): RefreshPayload {
+  private toTokenPayload(payload: string | JwtPayload): TokenPayload {
     if (
       typeof payload === 'string' ||
       typeof payload.sub !== 'string' ||

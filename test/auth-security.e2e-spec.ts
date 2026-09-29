@@ -179,21 +179,71 @@ describe('Segurança de autenticação (e2e)', () => {
     ).toBe(1);
   });
 
-  it('permite uma única rotação concorrente e revoga o acesso anterior', async () => {
+  it('rotaciona uma única vez sob concorrência e autoriza ambas as requisições', async () => {
     const session = await account();
-    const results = await Promise.allSettled([
+    const results = await Promise.all([
       tokens.rotateSession(session.refreshToken),
       tokens.rotateSession(session.refreshToken),
     ]);
-    expect(
-      results.filter((result) => result.status === 'fulfilled'),
-    ).toHaveLength(1);
+    expect(results.filter((result) => 'refreshToken' in result)).toHaveLength(
+      1,
+    );
+    for (const result of results) {
+      await expect(
+        tokens.authenticate(result.accessToken),
+      ).resolves.toMatchObject({ id: session.user.id });
+    }
     await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
     expect(
       await prisma.authSession.count({
         where: { userId: session.user.id, revokedAt: null },
       }),
     ).toBe(1);
+  });
+
+  it('revoga toda a cadeia de sessões ao detectar reuso do refresh token', async () => {
+    const session = await account();
+    const rotated = await tokens.rotateSession(session.refreshToken);
+    await prisma.authSession.updateMany({
+      where: { userId: session.user.id, replacedBySessionId: { not: null } },
+      data: { revokedAt: new Date(Date.now() - 2 * 60 * 1000) },
+    });
+
+    await expect(tokens.rotateSession(session.refreshToken)).rejects.toThrow();
+    await expect(tokens.authenticate(rotated.accessToken)).rejects.toThrow();
+    expect(
+      await prisma.authSession.count({
+        where: { userId: session.user.id, revokedAt: null },
+      }),
+    ).toBe(0);
+  });
+
+  it('mantém 30 dias de inatividade sem ultrapassar o limite absoluto do login', async () => {
+    const session = await account();
+    const [initial] = await prisma.authSession.findMany({
+      where: { userId: session.user.id },
+    });
+    const day = 24 * 60 * 60 * 1000;
+    expect(initial.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * day);
+    expect(initial.absoluteExpiresAt.getTime() - Date.now()).toBeGreaterThan(
+      89 * day,
+    );
+
+    const absoluteExpiresAt = new Date(Date.now() + 5 * day);
+    await prisma.authSession.update({
+      where: { id: initial.id },
+      data: { absoluteExpiresAt },
+    });
+    const rotated = await tokens.rotateSession(session.refreshToken);
+    const successor = await prisma.authSession.findFirstOrThrow({
+      where: { userId: session.user.id, revokedAt: null },
+    });
+
+    expect(successor.familyId).toBe(initial.familyId);
+    expect(successor.expiresAt).toEqual(absoluteExpiresAt);
+    expect(
+      'refreshTokenExpiresAt' in rotated && rotated.refreshTokenExpiresAt,
+    ).toEqual(absoluteExpiresAt);
   });
 
   it('preserva a sessão anterior se a criação da substituta falhar', async () => {
@@ -223,6 +273,16 @@ describe('Segurança de autenticação (e2e)', () => {
       .get('/users/me')
       .set('Cookie', `access_token=${session.accessToken}`)
       .expect(401);
+  });
+
+  it('logout com refresh token recém-rotacionado encerra a sessão sucessora', async () => {
+    const session = await account();
+    const rotated = await tokens.rotateSession(session.refreshToken);
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Cookie', `refresh_token=${session.refreshToken}`)
+      .expect(204);
+    await expect(tokens.authenticate(rotated.accessToken)).rejects.toThrow();
   });
 
   it('nega login, acesso e renovação para usuário inativo', async () => {
