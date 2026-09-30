@@ -235,6 +235,18 @@ describe('Imóveis e quartos (e2e)', () => {
     expect((incomplete.body as { message: string }).message).toContain(
       'ao menos uma foto',
     );
+    await http()
+      .get(path)
+      .set('Cookie', owner)
+      .expect(200)
+      .expect(({ body }: { body: Body }) =>
+        expect(body.missingRequirements).toEqual([
+          'DESCRIPTION',
+          'ADDRESS',
+          'PHOTO',
+          'ROOM',
+        ]),
+      );
 
     await http()
       .patch(path)
@@ -245,6 +257,13 @@ describe('Imóveis e quartos (e2e)', () => {
       201,
     );
     const room = await createRoom(owner, property.id);
+    await http()
+      .get(path)
+      .set('Cookie', owner)
+      .expect(200)
+      .expect(({ body }: { body: Body }) =>
+        expect(body.missingRequirements).toEqual([]),
+      );
 
     await http()
       .patch(`${path}/status`)
@@ -282,6 +301,20 @@ describe('Imóveis e quartos (e2e)', () => {
       .expect(({ body }: { body: Body }) =>
         expect(body.status).toBe('UNAVAILABLE'),
       );
+  });
+
+  it('exige sessão e CEP válido na consulta de endereço', async () => {
+    const owner = await account();
+
+    await http().get('/owner/postal-codes/70000000').expect(401);
+    await http()
+      .get('/owner/postal-codes/7000')
+      .set('Cookie', owner)
+      .expect(400);
+    await http()
+      .get('/owner/postal-codes/abcdefgh')
+      .set('Cookie', owner)
+      .expect(400);
   });
 
   it('valida arquivos pelo conteúdo, tipo permitido e ordem da galeria', async () => {
@@ -324,6 +357,8 @@ describe('Imóveis e quartos (e2e)', () => {
     expect((list.body as Body[])[0]).toMatchObject({
       id: property.id,
       roomCount: 1,
+      availableRoomCount: 1,
+      minAvailablePriceCents: roomInput.priceCents,
       coverUrl: expect.stringContaining(
         `assets/images/properties/${property.id}/`,
       ) as string,

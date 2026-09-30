@@ -21,6 +21,10 @@ import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { MAX_PROPERTY_IMAGES, MAX_PROPERTY_VIDEOS } from './property-catalog';
+import {
+  missingPublishRequirements,
+  publishRequirementLabels,
+} from './property-publish';
 
 type Transaction = Prisma.TransactionClient;
 type LockedProperty = { id: string; status: PropertyStatus };
@@ -69,23 +73,31 @@ export class PropertiesService {
           orderBy: mediaOrder,
           take: 1,
         },
-        _count: { select: { rooms: true } },
+        rooms: { select: { status: true, priceCents: true } },
       },
     });
 
-    return properties.map((property) => ({
-      id: property.id,
-      title: property.title,
-      type: property.type,
-      status: property.status,
-      featured: property.featured,
-      neighborhood: property.neighborhood,
-      city: property.city,
-      state: property.state,
-      coverUrl: this.mediaService.coverUrl(property.media),
-      roomCount: property._count.rooms,
-      updatedAt: property.updatedAt,
-    }));
+    return properties.map((property) => {
+      const availablePrices = property.rooms
+        .filter((room) => room.status === RoomStatus.AVAILABLE)
+        .map((room) => room.priceCents);
+      return {
+        id: property.id,
+        title: property.title,
+        type: property.type,
+        status: property.status,
+        featured: property.featured,
+        neighborhood: property.neighborhood,
+        city: property.city,
+        state: property.state,
+        coverUrl: this.mediaService.coverUrl(property.media),
+        roomCount: property.rooms.length,
+        availableRoomCount: availablePrices.length,
+        minAvailablePriceCents:
+          availablePrices.length > 0 ? Math.min(...availablePrices) : null,
+        updatedAt: property.updatedAt,
+      };
+    });
   }
 
   async create(userId: string, dto: CreatePropertyDto) {
@@ -370,22 +382,15 @@ export class PropertiesService {
       where: { propertyId, status: { not: RoomStatus.INACTIVE } },
     });
 
-    const missing = [
-      !property.description && 'descrição',
-      (!property.postalCode ||
-        !property.street ||
-        !property.number ||
-        !property.neighborhood ||
-        !property.city ||
-        !property.state) &&
-        'endereço completo',
-      imageCount === 0 && 'ao menos uma foto',
-      listableRoomCount === 0 && 'ao menos um quarto não inativo',
-    ].filter((item): item is string => Boolean(item));
+    const missing = missingPublishRequirements({
+      ...property,
+      imageCount,
+      listableRoomCount,
+    });
 
     if (missing.length > 0) {
       throw new UnprocessableEntityException(
-        `${prefix}: ${missing.join(', ')}.`,
+        `${prefix}: ${missing.map((item) => publishRequirementLabels[item]).join(', ')}.`,
       );
     }
   }
@@ -393,6 +398,14 @@ export class PropertiesService {
   private toDetail({ media, rooms, ...property }: PropertyDetail) {
     return {
       ...property,
+      missingRequirements: missingPublishRequirements({
+        ...property,
+        imageCount: media.filter((item) => item.type === MediaType.IMAGE)
+          .length,
+        listableRoomCount: rooms.filter(
+          (room) => room.status !== RoomStatus.INACTIVE,
+        ).length,
+      }),
       media: media.map((item) => this.mediaService.toResponse(item)),
       rooms: rooms.map(({ media: roomMedia, ...room }) => ({
         id: room.id,
