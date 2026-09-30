@@ -10,6 +10,8 @@ import { EnvironmentModule } from './infrastructure/environment/environment.modu
 import { EnvironmentService } from './infrastructure/environment/environment.service';
 import { REDIS_CLIENT, RedisModule } from './infrastructure/redis/redis.module';
 import { RedisThrottlerStorage } from './infrastructure/redis/redis-throttler.storage';
+import { PropertiesModule } from './properties/properties.module';
+import { RoomsModule } from './rooms/rooms.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -34,6 +36,8 @@ import { UsersModule } from './users/users.module';
     }),
     AuthModule,
     UsersModule,
+    PropertiesModule,
+    RoomsModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

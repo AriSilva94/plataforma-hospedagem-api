@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { Role } from '../generated/prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
+import { UpdateGuestProfileDto } from './dto/update-guest-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UsersService } from './users.service';
 
@@ -26,6 +27,14 @@ export class UsersController {
   @Post('me/profiles/guest')
   addGuestProfile(@CurrentUser() user: AuthenticatedRequest['user']) {
     return this.usersService.addProfile(user.id, Role.GUEST);
+  }
+
+  @Patch('me/profiles/guest')
+  updateGuestProfile(
+    @CurrentUser() user: AuthenticatedRequest['user'],
+    @Body() dto: UpdateGuestProfileDto,
+  ) {
+    return this.usersService.updateGuestProfile(user.id, dto);
   }
 
   @Post('me/profiles/owner')

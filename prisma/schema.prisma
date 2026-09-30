@@ -44,21 +44,23 @@ model User {
 }
 
 model GuestProfile {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @unique @map("user_id") @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String          @unique @map("user_id") @db.Uuid
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  genderIdentity GenderIdentity? @map("gender_identity")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
   @@map("guest_profiles")
 }
 
 model OwnerProfile {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @unique @map("user_id") @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String     @unique @map("user_id") @db.Uuid
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  properties Property[]
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
 
   @@map("owner_profiles")
 }
@@ -96,14 +98,158 @@ model ExternalAuthIdentity {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @unique @map("token_hash")
-  expiresAt DateTime @map("expires_at")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+enum GenderIdentity {
+  MAN
+  WOMAN
+  TRANS_WOMAN
+  TRANS_MAN
+}
+
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  TOWNHOUSE
+  STUDIO
+  SHARED_HOUSE
+  OTHER
+}
+
+enum PropertyStatus {
+  DRAFT
+  ACTIVE
+  UNAVAILABLE
+}
+
+enum SharedAreaType {
+  LIVING_ROOM
+  KITCHEN
+  SHARED_BATHROOM
+  LAUNDRY
+  OUTDOOR_AREA
+  GARAGE
+  OTHER
+}
+
+enum RoomStatus {
+  AVAILABLE
+  UNAVAILABLE
+  INACTIVE
+}
+
+enum BathroomType {
+  PRIVATE
+  SHARED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+model Property {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerProfileId  String               @map("owner_profile_id") @db.Uuid
+  ownerProfile    OwnerProfile         @relation(fields: [ownerProfileId], references: [id], onDelete: Restrict)
+  status          PropertyStatus       @default(DRAFT)
+  featured        Boolean              @default(false)
+  type            PropertyType
+  title           String
+  description     String?
+  houseRules      String?              @map("house_rules")
+  generalInfo     String?              @map("general_info")
+  features        String[]             @default([])
+  postalCode      String?              @map("postal_code")
+  street          String?
+  number          String?
+  complement      String?
+  neighborhood    String?
+  city            String?
+  state           String?              @db.Char(2)
+  referencePoints String[]             @default([]) @map("reference_points")
+  sharedAreas     PropertySharedArea[]
+  media           PropertyMedia[]
+  rooms           Room[]
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  @@index([ownerProfileId])
+  @@index([status, featured, createdAt])
+  @@map("properties")
+}
+
+model PropertySharedArea {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  propertyId  String         @map("property_id") @db.Uuid
+  property    Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  type        SharedAreaType
+  label       String?
+  description String?
+  position    Int
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  @@index([propertyId])
+  @@map("property_shared_areas")
+}
+
+model PropertyMedia {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  propertyId String    @map("property_id") @db.Uuid
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  type       MediaType
+  storageKey String    @unique @map("storage_key")
+  mimeType   String    @map("mime_type")
+  sizeBytes  Int       @map("size_bytes")
+  position   Int
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([propertyId, position])
+  @@map("property_media")
+}
+
+model Room {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  propertyId        String           @map("property_id") @db.Uuid
+  property          Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  status            RoomStatus       @default(AVAILABLE)
+  title             String
+  description       String?
+  priceCents        Int              @map("price_cents")
+  capacity          Int
+  bathroomType      BathroomType     @map("bathroom_type")
+  acceptedAudiences GenderIdentity[] @map("accepted_audiences")
+  amenities         String[]         @default([])
+  additionalInfo    String?          @map("additional_info")
+  media             RoomMedia[]
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  @@index([propertyId])
+  @@map("rooms")
+}
+
+model RoomMedia {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId     String    @map("room_id") @db.Uuid
+  room       Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type       MediaType
+  storageKey String    @unique @map("storage_key")
+  mimeType   String    @map("mime_type")
+  sizeBytes  Int       @map("size_bytes")
+  position   Int
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([roomId, position])
+  @@map("room_media")
 }
