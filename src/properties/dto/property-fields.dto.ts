@@ -3,7 +3,6 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
-  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -16,10 +15,6 @@ import { BRAZILIAN_STATES, PROPERTY_FEATURES } from '../property-catalog';
 import { OptionalNonNull } from '../../common/validation';
 
 export class PropertyFieldsDto {
-  @OptionalNonNull()
-  @IsBoolean()
-  featured?: boolean;
-
   @TrimToNull()
   @IsOptional()
   @IsString()

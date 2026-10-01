@@ -12,6 +12,7 @@ import {
   nextPosition,
 } from '../media/media.service';
 import { PropertiesService } from '../properties/properties.service';
+import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { MAX_ROOM_IMAGES } from './room-catalog';
@@ -23,7 +24,18 @@ const roomDetailInclude = {
   property: { select: { id: true, title: true, status: true } },
 } satisfies Prisma.RoomInclude;
 
-type RoomDetail = Prisma.RoomGetPayload<{ include: typeof roomDetailInclude }>;
+const internalRoomFields = {
+  rankingScore: true,
+  rankingVersion: true,
+  rankingUpdatedAt: true,
+  featuredFrom: true,
+  featuredUntil: true,
+} satisfies Prisma.RoomOmit;
+
+type RoomDetail = Prisma.RoomGetPayload<{
+  include: typeof roomDetailInclude;
+  omit: typeof internalRoomFields;
+}>;
 
 @Injectable()
 export class RoomsService {
@@ -31,15 +43,18 @@ export class RoomsService {
     private readonly prisma: PrismaService,
     private readonly propertiesService: PropertiesService,
     private readonly mediaService: MediaService,
+    private readonly roomRanking: RoomRankingService,
   ) {}
 
   async create(userId: string, propertyId: string, dto: CreateRoomDto) {
     const room = await this.prisma.$transaction(async (transaction) => {
       await this.propertiesService.lockOwned(transaction, userId, propertyId);
-      return transaction.room.create({
+      const created = await transaction.room.create({
         data: { ...dto, propertyId },
         select: { id: true },
       });
+      await this.roomRanking.recalculateRoom(transaction, created.id);
+      return created;
     });
     return this.get(userId, room.id);
   }
@@ -48,11 +63,15 @@ export class RoomsService {
     const room = await this.prisma.room.findFirst({
       where: { id: roomId, property: { ownerProfile: { userId } } },
       include: roomDetailInclude,
+      omit: internalRoomFields,
     });
     if (!room) {
       throw roomNotFound();
     }
-    return this.toDetail(room);
+    return {
+      ...this.toDetail(room),
+      completenessMissing: await this.roomRanking.missingCompleteness(room.id),
+    };
   }
 
   async update(userId: string, roomId: string, dto: UpdateRoomDto) {
@@ -64,6 +83,7 @@ export class RoomsService {
       );
       await transaction.room.update({ where: { id: roomId }, data: dto });
       await this.propertiesService.assertListedComplete(transaction, property);
+      await this.roomRanking.recalculateRoom(transaction, roomId);
     });
     return this.get(userId, roomId);
   }
@@ -108,9 +128,11 @@ export class RoomsService {
             `O quarto pode ter no máximo ${MAX_ROOM_IMAGES} fotos.`,
           );
         }
-        return transaction.roomMedia.create({
+        const created = await transaction.roomMedia.create({
           data: { ...stored, roomId, position: nextPosition(existing) },
         });
+        await this.roomRanking.recalculateRoom(transaction, roomId);
+        return created;
       });
       return this.mediaService.toResponse(media);
     } catch (error) {
@@ -159,6 +181,7 @@ export class RoomsService {
         throw new NotFoundException('Mídia não encontrada.');
       }
       await transaction.roomMedia.delete({ where: { id: media.id } });
+      await this.roomRanking.recalculateRoom(transaction, roomId);
       return media.storageKey;
     });
     await this.mediaService.removeQuietly([storageKey]);

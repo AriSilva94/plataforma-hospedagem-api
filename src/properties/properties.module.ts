@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { MediaModule } from '../media/media.module';
+import { RankingModule } from '../ranking/ranking.module';
 import { PostalCodeService } from './postal-code.service';
 import { PostalCodesController } from './postal-codes.controller';
 import { PropertiesController } from './properties.controller';
@@ -9,7 +10,7 @@ import { PublicPropertiesController } from './public-properties.controller';
 import { PublicPropertiesService } from './public-properties.service';
 
 @Module({
-  imports: [AuthModule, MediaModule],
+  imports: [AuthModule, MediaModule, RankingModule],
   controllers: [
     PropertiesController,
     PostalCodesController,

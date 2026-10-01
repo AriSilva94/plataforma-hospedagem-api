@@ -17,6 +17,7 @@ import {
   UploadedMediaFile,
   nextPosition,
 } from '../media/media.service';
+import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
@@ -61,6 +62,7 @@ export class PropertiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly roomRanking: RoomRankingService,
   ) {}
 
   async list(userId: string) {
@@ -86,7 +88,6 @@ export class PropertiesService {
         title: property.title,
         type: property.type,
         status: property.status,
-        featured: property.featured,
         neighborhood: property.neighborhood,
         city: property.city,
         state: property.state,
@@ -138,6 +139,11 @@ export class PropertiesService {
         data: dto,
       });
       await this.assertListedComplete(transaction, property);
+      await this.roomRanking.recalculatePropertyIfChanged(
+        transaction,
+        propertyId,
+        dto,
+      );
     });
     return this.get(userId, propertyId);
   }
@@ -221,6 +227,7 @@ export class PropertiesService {
           position,
         })),
       });
+      await this.roomRanking.recalculateProperty(transaction, propertyId);
     });
     return this.get(userId, propertyId);
   }
@@ -256,13 +263,15 @@ export class PropertiesService {
               : `O imóvel pode ter no máximo ${limit} vídeos.`,
           );
         }
-        return transaction.propertyMedia.create({
+        const created = await transaction.propertyMedia.create({
           data: {
             ...stored,
             propertyId,
             position: nextPosition(existing),
           },
         });
+        await this.roomRanking.recalculateProperty(transaction, propertyId);
+        return created;
       });
       return this.mediaService.toResponse(media);
     } catch (error) {
@@ -312,6 +321,7 @@ export class PropertiesService {
       }
       await transaction.propertyMedia.delete({ where: { id: media.id } });
       await this.assertListedComplete(transaction, property);
+      await this.roomRanking.recalculateProperty(transaction, propertyId);
       return media.storageKey;
     });
     await this.mediaService.removeQuietly([storageKey]);
@@ -415,6 +425,7 @@ export class PropertiesService {
         capacity: room.capacity,
         bathroomType: room.bathroomType,
         acceptedAudiences: room.acceptedAudiences,
+        completenessScore: room.completenessScore,
         coverUrl: this.mediaService.coverUrl(roomMedia),
       })),
     };

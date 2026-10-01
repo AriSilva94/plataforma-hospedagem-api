@@ -1,23 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import {
-  MediaType,
-  Prisma,
-  PropertyStatus,
-  RoomStatus,
-} from '../generated/prisma/client';
+import { Prisma, RoomStatus } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
-import { ListPublicPropertiesDto } from './dto/list-public-properties.dto';
+import { visiblePropertyWhere } from './public-listing';
 
 const mediaOrder: Prisma.PropertyMediaOrderByWithRelationInput[] = [
   { position: 'asc' },
   { createdAt: 'asc' },
 ];
-
-const listedProperty = {
-  status: PropertyStatus.ACTIVE,
-  rooms: { some: { status: RoomStatus.AVAILABLE } },
-} satisfies Prisma.PropertyWhereInput;
 
 const publicDetailSelect = {
   id: true,
@@ -61,54 +51,9 @@ export class PublicPropertiesService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async list({ featured, page, limit }: ListPublicPropertiesDto) {
-    const where: Prisma.PropertyWhereInput = {
-      ...listedProperty,
-      ...(featured === undefined ? {} : { featured }),
-    };
-    const total = await this.prisma.property.count({ where });
-    const properties = await this.prisma.property.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      skip: (page - 1) * limit,
-      take: limit,
-      select: {
-        id: true,
-        title: true,
-        type: true,
-        featured: true,
-        neighborhood: true,
-        city: true,
-        state: true,
-        media: {
-          where: { type: MediaType.IMAGE },
-          orderBy: mediaOrder,
-          take: 1,
-        },
-        rooms: {
-          where: { status: RoomStatus.AVAILABLE },
-          orderBy: { priceCents: 'asc' },
-          take: 1,
-          select: { priceCents: true },
-        },
-      },
-    });
-
-    return {
-      items: properties.map(({ media, rooms, ...property }) => ({
-        ...property,
-        coverUrl: this.mediaService.coverUrl(media),
-        startingPriceCents: rooms[0].priceCents,
-      })),
-      page,
-      limit,
-      total,
-    };
-  }
-
   async get(propertyId: string) {
     const property = await this.prisma.property.findFirst({
-      where: { id: propertyId, ...listedProperty },
+      where: { id: propertyId, ...visiblePropertyWhere },
       select: publicDetailSelect,
     });
     if (!property) {

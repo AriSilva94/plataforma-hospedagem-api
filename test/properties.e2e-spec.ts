@@ -1,38 +1,13 @@
-import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
-import { randomUUID } from 'crypto';
-import { finished } from 'stream/promises';
-import { AppModule } from '../src/app.module';
-import { configureApplication } from '../src/app.config';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
-import { AuthService } from '../src/auth/auth.service';
-import { UsersService } from '../src/users/users.service';
-import { MediaObject, MediaStorage } from '../src/media/media-storage';
-
-class InMemoryMediaStorage extends MediaStorage {
-  readonly objects = new Map<string, string>();
-
-  async put({ key, body, contentType }: MediaObject) {
-    body.resume();
-    await finished(body);
-    this.objects.set(key, contentType);
-  }
-
-  delete(keys: string[]) {
-    keys.forEach((key) => this.objects.delete(key));
-    return Promise.resolve();
-  }
-
-  publicUrl(key: string) {
-    return `https://media.test/${key}`;
-  }
-}
-
-const png = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d,
-]);
+import {
+  InMemoryMediaStorage,
+  TestAccounts,
+  createE2eApp,
+  png,
+} from './support/e2e';
 const mp4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
   Buffer.from('ftypisom', 'latin1'),
@@ -63,31 +38,16 @@ type Body = Record<string, unknown>;
 describe('Imóveis e quartos (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let accounts: TestAccounts;
   const storage = new InMemoryMediaStorage();
-  const userIds: string[] = [];
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(MediaStorage)
-      .useValue(storage)
-      .compile();
-    app = module.createNestApplication();
-    configureApplication(app);
-    await app.init();
-    prisma = app.get(PrismaService);
+    ({ app, prisma } = await createE2eApp(storage));
+    accounts = new TestAccounts(app, 'owner');
   });
 
   async function account(roles: ('GUEST' | 'OWNER')[] = ['OWNER']) {
-    const result = await app.get(AuthService).register({
-      name: 'Proprietário de teste',
-      email: `owner-${randomUUID()}@example.com`,
-      password: 'senha-segura-de-teste',
-    });
-    userIds.push(result.user.id);
-    for (const role of roles) {
-      await app.get(UsersService).addProfile(result.user.id, role);
-    }
-    return `access_token=${result.accessToken}`;
+    return (await accounts.create(roles, 'Proprietário de teste')).cookie;
   }
 
   const http = () => request(app.getHttpServer());
@@ -458,14 +418,13 @@ describe('Imóveis e quartos (e2e)', () => {
     ).resolves.toBeNull();
   });
 
-  it('lista publicamente só imóveis ativos com quarto disponível, sem dados privados', async () => {
+  it('expõe o detalhe público só de imóveis ativos com quarto disponível, sem dados privados', async () => {
     const owner = await account();
 
-    async function publish(featured: boolean) {
+    async function publish() {
       const property = await createProperty(owner, {
         ...completeAddress,
         complement: 'Apto 12',
-        featured,
       });
       await upload(
         owner,
@@ -482,49 +441,17 @@ describe('Imóveis e quartos (e2e)', () => {
       return { property, room };
     }
 
-    const featured = await publish(true);
-    const regular = await publish(false);
-    const withoutAvailableRoom = await publish(false);
+    const listed = await publish();
+    const withoutAvailableRoom = await publish();
     await http()
       .patch(`/owner/rooms/${withoutAvailableRoom.room.id}`)
       .set('Cookie', owner)
       .send({ status: 'UNAVAILABLE' })
       .expect(200);
-    const draft = await createProperty(owner, { featured: true });
-
-    const listIds = async (query: string) => {
-      const response = await http()
-        .get(`/properties?limit=48${query}`)
-        .expect(200);
-      return (response.body as { items: { id: string }[] }).items.map(
-        (item) => item.id,
-      );
-    };
-
-    const all = await listIds('');
-    expect(all).toEqual(
-      expect.arrayContaining([featured.property.id, regular.property.id]),
-    );
-    expect(all).not.toContain(withoutAvailableRoom.property.id);
-    expect(all).not.toContain(draft.id);
-
-    const featuredIds = await listIds('&featured=true');
-    expect(featuredIds).toContain(featured.property.id);
-    expect(featuredIds).not.toContain(regular.property.id);
-    expect(featuredIds).not.toContain(draft.id);
-
-    const list = await http().get('/properties?limit=48').expect(200);
-    const item = (list.body as { items: Body[] }).items.find(
-      (candidate) => candidate.id === featured.property.id,
-    );
-    expect(item).toMatchObject({
-      startingPriceCents: roomInput.priceCents,
-      neighborhood: 'Bela Vista',
-      featured: true,
-    });
+    const draft = await createProperty(owner);
 
     const detail = await http()
-      .get(`/properties/${featured.property.id}`)
+      .get(`/properties/${listed.property.id}`)
       .expect(200);
     const body = detail.body as Body & { rooms: Body[] };
     for (const key of [
@@ -543,12 +470,19 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(body.rooms[0]).toMatchObject({
       acceptedAudiences: roomInput.acceptedAudiences,
     });
+    for (const key of [
+      'completenessScore',
+      'rankingScore',
+      'featuredFrom',
+      'featuredUntil',
+    ]) {
+      expect(body.rooms[0]).not.toHaveProperty(key);
+    }
 
     await http().get(`/properties/${draft.id}`).expect(404);
     await http()
       .get(`/properties/${withoutAvailableRoom.property.id}`)
       .expect(404);
-    await http().get('/properties?limit=100').expect(400);
   });
 
   it('permite ao hóspede informar o público no próprio perfil', async () => {
@@ -578,12 +512,7 @@ describe('Imóveis e quartos (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.property.deleteMany({
-        where: { ownerProfile: { userId: { in: userIds } } },
-      });
-      await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-    }
+    await accounts?.removeAll();
     await app?.close();
   });
 });

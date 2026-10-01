@@ -163,7 +163,6 @@ model Property {
   ownerProfileId  String               @map("owner_profile_id") @db.Uuid
   ownerProfile    OwnerProfile         @relation(fields: [ownerProfileId], references: [id], onDelete: Restrict)
   status          PropertyStatus       @default(DRAFT)
-  featured        Boolean              @default(false)
   type            PropertyType
   title           String
   description     String?
@@ -185,7 +184,6 @@ model Property {
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
   @@index([ownerProfileId])
-  @@index([status, featured, createdAt])
   @@map("properties")
 }
 
@@ -231,11 +229,19 @@ model Room {
   acceptedAudiences GenderIdentity[] @map("accepted_audiences")
   amenities         String[]         @default([])
   additionalInfo    String?          @map("additional_info")
+  completenessScore Int              @default(0) @map("completeness_score")
+  rankingScore      Int              @default(0) @map("ranking_score")
+  rankingVersion    Int              @default(0) @map("ranking_version")
+  rankingUpdatedAt  DateTime?        @map("ranking_updated_at")
+  featuredFrom      DateTime?        @map("featured_from")
+  featuredUntil     DateTime?        @map("featured_until")
   media             RoomMedia[]
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
   @@index([propertyId])
+  @@index([status, rankingScore(sort: Desc), id])
+  @@index([featuredUntil])
   @@map("rooms")
 }
 
