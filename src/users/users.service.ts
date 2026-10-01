@@ -10,6 +10,7 @@ import {
   isUniqueConstraintError,
 } from '../infrastructure/prisma/prisma-error';
 import { toPublicUser } from './public-user';
+import { UpdateGuestProfileDto } from './dto/update-guest-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 
 @Injectable()
@@ -80,6 +81,21 @@ export class UsersService {
       }
     }
 
+    return this.getMe(userId);
+  }
+
+  async updateGuestProfile(userId: string, dto: UpdateGuestProfileDto) {
+    try {
+      await this.prisma.guestProfile.update({
+        where: { userId },
+        data: { genderIdentity: dto.genderIdentity },
+      });
+    } catch (error) {
+      if (isRecordNotFoundError(error)) {
+        throw new NotFoundException('Perfil de hóspede não encontrado.');
+      }
+      throw error;
+    }
     return this.getMe(userId);
   }
 

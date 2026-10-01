@@ -17,6 +17,8 @@
     "skipLibCheck": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
-    "noFallthroughCasesInSwitch": true
-  }
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node", "jest"]
+  },
+  "exclude": ["node_modules", "dist", "test/load"]
 }
