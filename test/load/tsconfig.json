@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["k6"],
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": ["*.ts"],
+  "exclude": []
+}

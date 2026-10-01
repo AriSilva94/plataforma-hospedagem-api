@@ -25,6 +25,18 @@ services:
       - "127.0.0.1:1025:1025"
       - "127.0.0.1:8025:8025"
 
+  k6:
+    image: grafana/k6:2.3.0
+    profiles: ["load"]
+    working_dir: /scripts
+    volumes:
+      - ./test/load:/scripts:ro
+    environment:
+      BASE_URL: ${K6_BASE_URL:-http://host.docker.internal:3030}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["run", "rooms-listing.k6.ts"]
+
 volumes:
   postgres_data:
   redis_data:
