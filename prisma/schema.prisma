@@ -37,6 +37,7 @@ model User {
   authSessions           AuthSession[]
   externalAuthIdentities ExternalAuthIdentity[]
   passwordResetTokens    PasswordResetToken[]
+  favorites              Favorite[]
   createdAt              DateTime               @default(now()) @map("created_at")
   updatedAt              DateTime               @updatedAt @map("updated_at")
 
@@ -236,6 +237,7 @@ model Room {
   featuredFrom      DateTime?        @map("featured_from")
   featuredUntil     DateTime?        @map("featured_until")
   media             RoomMedia[]
+  favorites         Favorite[]
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
@@ -243,6 +245,19 @@ model Room {
   @@index([status, rankingScore(sort: Desc), id])
   @@index([featuredUntil])
   @@map("rooms")
+}
+
+model Favorite {
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId    String   @map("room_id") @db.Uuid
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([userId, roomId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([roomId])
+  @@map("favorites")
 }
 
 model RoomMedia {

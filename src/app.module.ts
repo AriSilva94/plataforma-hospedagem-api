@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
+import { FavoritesModule } from './favorites/favorites.module';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
 import { EnvironmentModule } from './infrastructure/environment/environment.module';
 import { EnvironmentService } from './infrastructure/environment/environment.service';
@@ -40,6 +41,7 @@ import { UsersModule } from './users/users.module';
     PropertiesModule,
     RoomsModule,
     AdminModule,
+    FavoritesModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
