@@ -17,6 +17,7 @@ import {
   UploadedMediaFile,
   nextPosition,
 } from '../media/media.service';
+import { evaluateCompleteness } from '../ranking/room-completeness';
 import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
@@ -46,6 +47,7 @@ const propertyDetailInclude = {
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
         take: 1,
       },
+      _count: { select: { media: { where: { type: MediaType.IMAGE } } } },
     },
   },
 } satisfies Prisma.PropertyInclude;
@@ -406,18 +408,20 @@ export class PropertiesService {
   }
 
   private toDetail({ media, rooms, ...property }: PropertyDetail) {
+    const propertyImageCount = media.filter(
+      (item) => item.type === MediaType.IMAGE,
+    ).length;
     return {
       ...property,
       missingRequirements: missingPublishRequirements({
         ...property,
-        imageCount: media.filter((item) => item.type === MediaType.IMAGE)
-          .length,
+        imageCount: propertyImageCount,
         listableRoomCount: rooms.filter(
           (room) => room.status !== RoomStatus.INACTIVE,
         ).length,
       }),
       media: media.map((item) => this.mediaService.toResponse(item)),
-      rooms: rooms.map(({ media: roomMedia, ...room }) => ({
+      rooms: rooms.map(({ media: roomMedia, _count, ...room }) => ({
         id: room.id,
         title: room.title,
         status: room.status,
@@ -426,6 +430,23 @@ export class PropertiesService {
         bathroomType: room.bathroomType,
         acceptedAudiences: room.acceptedAudiences,
         completenessScore: room.completenessScore,
+        completenessMissing: evaluateCompleteness({
+          room: {
+            description: room.description,
+            amenities: room.amenities,
+            additionalInfo: room.additionalInfo,
+            imageCount: _count.media,
+          },
+          property: {
+            description: property.description,
+            houseRules: property.houseRules,
+            generalInfo: property.generalInfo,
+            features: property.features,
+            referencePoints: property.referencePoints,
+            sharedAreaCount: property.sharedAreas.length,
+            imageCount: propertyImageCount,
+          },
+        }).missing,
         coverUrl: this.mediaService.coverUrl(roomMedia),
       })),
     };

@@ -103,6 +103,7 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       .expect(200);
     expect(roomDetail.body).toMatchObject({
       completenessScore: initial.completenessScore,
+      property: { id: propertyId, status: 'ACTIVE', availableRoomCount: 1 },
     });
     expect((roomDetail.body as Body).completenessMissing).toEqual(
       expect.arrayContaining(['HOUSE_RULES', 'ROOM_PHOTOS']),
@@ -147,6 +148,15 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       completenessScore: afterMedia.completenessScore,
     });
     expect(hubRoom).not.toHaveProperty('rankingScore');
+    const roomDetailAfter = await http()
+      .get(`/owner/rooms/${roomId}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+    expect(hubRoom.completenessMissing).toEqual(
+      (roomDetailAfter.body as Body).completenessMissing,
+    );
+    expect(hubRoom.completenessMissing).not.toContain('ROOM_PHOTOS');
+    expect(hubRoom.completenessMissing).not.toContain('HOUSE_RULES');
 
     await http()
       .patch(`/owner/properties/${propertyId}`)
