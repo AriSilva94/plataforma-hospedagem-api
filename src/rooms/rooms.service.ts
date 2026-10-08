@@ -3,7 +3,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { MediaType, Prisma } from '../generated/prisma/client';
+import { MediaType, Prisma, RoomStatus } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import {
@@ -21,7 +21,16 @@ type Transaction = Prisma.TransactionClient;
 
 const roomDetailInclude = {
   media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
-  property: { select: { id: true, title: true, status: true } },
+  property: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      _count: {
+        select: { rooms: { where: { status: RoomStatus.AVAILABLE } } },
+      },
+    },
+  },
 } satisfies Prisma.RoomInclude;
 
 const internalRoomFields = {
@@ -215,9 +224,11 @@ export class RoomsService {
     );
   }
 
-  private toDetail({ media, ...room }: RoomDetail) {
+  private toDetail({ media, property, ...room }: RoomDetail) {
+    const { _count, ...propertySummary } = property;
     return {
       ...room,
+      property: { ...propertySummary, availableRoomCount: _count.rooms },
       media: media.map((item) => this.mediaService.toResponse(item)),
     };
   }

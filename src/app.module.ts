@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import Redis from 'ioredis';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
+import { FavoritesModule } from './favorites/favorites.module';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
 import { EnvironmentModule } from './infrastructure/environment/environment.module';
 import { EnvironmentService } from './infrastructure/environment/environment.service';
 import { REDIS_CLIENT, RedisModule } from './infrastructure/redis/redis.module';
+import { ClientIpThrottlerGuard } from './infrastructure/throttling/client-ip-throttler.guard';
 import { RedisThrottlerStorage } from './infrastructure/redis/redis-throttler.storage';
 import { PropertiesModule } from './properties/properties.module';
 import { RoomsModule } from './rooms/rooms.module';
@@ -40,8 +41,9 @@ import { UsersModule } from './users/users.module';
     PropertiesModule,
     RoomsModule,
     AdminModule,
+    FavoritesModule,
   ],
   controllers: [AppController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: ClientIpThrottlerGuard }],
 })
 export class AppModule {}

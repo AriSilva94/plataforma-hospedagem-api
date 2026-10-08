@@ -6,7 +6,8 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { configureApplication } from '../../src/app.config';
 import { AppModule } from '../../src/app.module';
-import { AuthService } from '../../src/auth/auth.service';
+import { PasswordService } from '../../src/auth/password.service';
+import { TokenService } from '../../src/auth/token.service';
 import { PrismaService } from '../../src/infrastructure/prisma/prisma.service';
 import { MediaObject, MediaStorage } from '../../src/media/media-storage';
 import { UsersService } from '../../src/users/users.service';
@@ -68,6 +69,33 @@ export async function createE2eApp(
   return { app, prisma: app.get(PrismaService), storage };
 }
 
+export async function createVerifiedAccount(
+  app: INestApplication<App>,
+  account: { name: string; email: string; password: string },
+) {
+  const user = await app.get(PrismaService).user.create({
+    data: {
+      name: account.name,
+      email: account.email,
+      passwordHash: await app.get(PasswordService).hash(account.password),
+      emailVerifiedAt: new Date(),
+      roles: [],
+    },
+  });
+  const tokens = await app.get(TokenService).createSession(user);
+  return { ...tokens, user };
+}
+
+export async function waitFor(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error('A condição esperada não ocorreu a tempo.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 export class TestAccounts {
   private readonly userIds: string[] = [];
 
@@ -81,7 +109,7 @@ export class TestAccounts {
     name = 'Usuário de teste',
   ): Promise<{ id: string; email: string; cookie: string }> {
     const email = `${this.emailPrefix}-${randomUUID()}@example.com`;
-    const result = await this.app.get(AuthService).register({
+    const result = await createVerifiedAccount(this.app, {
       name,
       email,
       password: 'senha-segura-de-teste',

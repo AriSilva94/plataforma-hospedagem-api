@@ -74,6 +74,14 @@ function createService() {
     user: {
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(user),
+      update: jest.fn().mockResolvedValue(user),
+    },
+    authSession: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    passwordResetToken: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    emailVerificationToken: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
   };
   const prisma = {
@@ -95,8 +103,13 @@ function createService() {
         ],
     ),
   };
-  const service = new GoogleAuthService(prisma as never, environment as never);
-  return { service, prisma };
+  const queue = { enqueueWelcome: jest.fn().mockResolvedValue(undefined) };
+  const service = new GoogleAuthService(
+    prisma as never,
+    queue as never,
+    environment as never,
+  );
+  return { service, prisma, queue };
 }
 
 function mockGoogle(idToken: string | undefined, tokenStatus = 200): jest.Mock {
@@ -222,7 +235,7 @@ describe('GoogleAuthService', () => {
   });
 
   it('vincula e-mail verificado à conta existente sem criar usuário', async () => {
-    const { service, prisma } = createService();
+    const { service, prisma, queue } = createService();
     prisma.user.findUnique.mockResolvedValue(user);
     mockGoogle(makeIdToken());
 
@@ -233,6 +246,7 @@ describe('GoogleAuthService', () => {
       where: { email: 'ana@example.com' },
     });
     expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(queue.enqueueWelcome).not.toHaveBeenCalled();
     expect(prisma.externalAuthIdentity.create).toHaveBeenCalledWith({
       data: {
         provider: AuthProvider.GOOGLE,
@@ -242,8 +256,42 @@ describe('GoogleAuthService', () => {
     });
   });
 
-  it('cria usuário sem senha ou perfis e a identidade quando não há conta', async () => {
+  it('remove senha, sessões e tokens de quem criou a conta antes do titular vincular o Google', async () => {
     const { service, prisma } = createService();
+    prisma.user.findUnique.mockResolvedValue({
+      ...user,
+      passwordHash: 'hash-definido-por-terceiro',
+    });
+    mockGoogle(makeIdToken());
+
+    await service.authenticateCallback('code', nonce);
+
+    expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: expect.any(Date) as Date },
+    });
+    expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: user.id },
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: user.id },
+      data: { passwordHash: null, emailVerifiedAt: expect.any(Date) as Date },
+    });
+  });
+
+  it('não revoga sessões nem altera senha ao entrar com identidade já vinculada', async () => {
+    const { service, prisma } = createService();
+    prisma.externalAuthIdentity.findUnique.mockResolvedValue({ user });
+    mockGoogle(makeIdToken());
+
+    await service.authenticateCallback('code', nonce);
+
+    expect(prisma.authSession.updateMany).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('cria usuário sem senha ou perfis e a identidade quando não há conta', async () => {
+    const { service, prisma, queue } = createService();
     mockGoogle(makeIdToken());
 
     await expect(service.authenticateCallback('code', nonce)).resolves.toEqual(
@@ -254,9 +302,11 @@ describe('GoogleAuthService', () => {
         name: 'Ana Silva',
         email: 'ana@example.com',
         passwordHash: null,
+        emailVerifiedAt: expect.any(Date) as Date,
         roles: [],
       },
     });
+    expect(queue.enqueueWelcome).toHaveBeenCalledWith(user.id);
     expect(prisma.externalAuthIdentity.create).toHaveBeenCalledWith({
       data: {
         provider: AuthProvider.GOOGLE,

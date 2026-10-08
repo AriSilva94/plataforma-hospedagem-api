@@ -9,6 +9,7 @@ import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { EmailService } from '../src/auth/email.service';
 import { TokenService } from '../src/auth/token.service';
+import { createVerifiedAccount, waitFor } from './support/e2e';
 import { GoogleAuthService } from '../src/auth/google-auth.service';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../src/infrastructure/redis/redis.module';
@@ -23,12 +24,27 @@ describe('Segurança de autenticação (e2e)', () => {
   const sendPasswordReset = jest
     .fn<Promise<void>, [string, string]>()
     .mockResolvedValue(undefined);
+  const sendPasswordChanged = jest
+    .fn<Promise<void>, [string]>()
+    .mockResolvedValue(undefined);
+  const sendEmailConfirmation = jest
+    .fn<Promise<void>, [string, string]>()
+    .mockResolvedValue(undefined);
+  const sendAccountExists = jest
+    .fn<Promise<void>, [string]>()
+    .mockResolvedValue(undefined);
   const password = 'senha-segura-de-teste';
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(EmailService)
-      .useValue({ sendPasswordReset })
+      .useValue({
+        sendPasswordReset,
+        sendPasswordChanged,
+        sendEmailConfirmation,
+        sendAccountExists,
+        sendWelcome: jest.fn().mockResolvedValue(undefined),
+      })
       .compile();
     app = module.createNestApplication();
     configureApplication(app);
@@ -39,7 +55,7 @@ describe('Segurança de autenticação (e2e)', () => {
   });
 
   async function account() {
-    const result = await auth.register({
+    const result = await createVerifiedAccount(app, {
       name: 'Teste de segurança',
       email: `review-${randomUUID()}@example.com`,
       password,
@@ -144,10 +160,12 @@ describe('Segurança de autenticação (e2e)', () => {
     await request(app.getHttpServer())
       .patch('/users/me')
       .set('Cookie', cookie)
-      .send({
-        name: '  Nome atualizado  ',
-        email: `  ${session.user.email.toUpperCase()}  `,
-      })
+      .send({ email: `outro-${randomUUID()}@example.com` })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Cookie', cookie)
+      .send({ name: '  Nome atualizado  ' })
       .expect(200)
       .expect(({ body }: { body: unknown }) => {
         expect(body).toMatchObject({
@@ -299,20 +317,35 @@ describe('Segurança de autenticação (e2e)', () => {
 
   it('recupera a senha, impede reutilização do token e revoga sessões', async () => {
     const session = await account();
-    await auth.requestPasswordReset({ email: session.user.email });
-    const firstToken = sendPasswordReset.mock.calls.find(
-      ([email]) => email === session.user.email,
-    )?.[1];
-    expect(firstToken).toBeDefined();
-    await auth.requestPasswordReset({ email: session.user.email });
-    const token = sendPasswordReset.mock.calls.at(-1)?.[1];
+    const sentTokens = () =>
+      sendPasswordReset.mock.calls
+        .filter(([email]) => email === session.user.email)
+        .map(([, sentToken]) => sentToken);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await request(app.getHttpServer())
+        .post('/auth/forgot-password')
+        .send({ email: session.user.email })
+        .expect(202);
+    }
+    await waitFor(() => sentTokens().length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sentTokens()).toHaveLength(1);
+
+    await auth.issuePasswordReset(session.user.email);
+    const [firstToken, token] = sentTokens();
     if (!firstToken || !token) {
       throw new Error('O envio dos tokens de recuperação não foi registrado.');
     }
-    const stored = await prisma.passwordResetToken.findFirstOrThrow({
+    const storedTokens = await prisma.passwordResetToken.findMany({
       where: { userId: session.user.id },
     });
-    expect(stored.tokenHash).not.toBe(token);
+    expect(storedTokens).toHaveLength(1);
+    expect(storedTokens[0].tokenHash).not.toBe(token);
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token: firstToken, password })
+      .expect(401);
     const newPassword = 'outra-senha-segura';
     await request(app.getHttpServer())
       .post('/auth/reset-password')
@@ -322,10 +355,11 @@ describe('Segurança de autenticação (e2e)', () => {
       .post('/auth/reset-password')
       .send({ token, password })
       .expect(401);
-    await request(app.getHttpServer())
-      .post('/auth/reset-password')
-      .send({ token: firstToken, password })
-      .expect(401);
+    await waitFor(() =>
+      sendPasswordChanged.mock.calls.some(
+        ([email]) => email === session.user.email,
+      ),
+    );
     await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
     await expect(
       auth.login({ email: session.user.email, password }),
@@ -333,6 +367,139 @@ describe('Segurança de autenticação (e2e)', () => {
     await expect(
       auth.login({ email: session.user.email, password: newPassword }),
     ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
+  it('recusa token de recuperação expirado sem alterar a senha', async () => {
+    const session = await account();
+    await auth.issuePasswordReset(session.user.email);
+    const token = sendPasswordReset.mock.calls.at(-1)?.[1];
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: session.user.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token, password: 'outra-senha-segura' })
+      .expect(401);
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
+  it('não emite recuperação para conta inativa nem para e-mail sem conta', async () => {
+    const session = await account();
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { status: 'INACTIVE' },
+    });
+    const sentBefore = sendPasswordReset.mock.calls.length;
+
+    await auth.issuePasswordReset(session.user.email);
+    await auth.issuePasswordReset('ninguem@example.com');
+
+    expect(sendPasswordReset.mock.calls).toHaveLength(sentBefore);
+    await request(app.getHttpServer())
+      .post('/auth/forgot-password')
+      .send({ email: 'ninguem@example.com' })
+      .expect(202);
+  });
+
+  it('recusa token de recuperação fora do formato emitido', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/reset-password')
+      .send({ token: 'z'.repeat(64), password: 'outra-senha-segura' })
+      .expect(400);
+  });
+
+  it('responde igual ao cadastro de e-mail já usado e avisa o titular sem criar conta', async () => {
+    const session = await account();
+
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ name: 'Outra pessoa', email: session.user.email, password })
+      .expect(202)
+      .expect({
+        message: 'Enviamos um link de confirmação para o e-mail informado.',
+      });
+
+    await waitFor(() =>
+      sendAccountExists.mock.calls.some(([to]) => to === session.user.email),
+    );
+    expect(
+      sendEmailConfirmation.mock.calls.some(
+        ([to]) => to === session.user.email,
+      ),
+    ).toBe(false);
+    await expect(
+      prisma.pendingRegistration.count({
+        where: { email: session.user.email },
+      }),
+    ).resolves.toBe(0);
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
+  it('recusa link de cadastro expirado sem criar conta', async () => {
+    const email = `expired-${randomUUID()}@example.com`;
+    await auth.register({ name: 'Cadastro expirado', email, password });
+    await waitFor(() =>
+      sendEmailConfirmation.mock.calls.some(([to]) => to === email),
+    );
+    const token = sendEmailConfirmation.mock.calls.find(
+      ([to]) => to === email,
+    )?.[1];
+    await prisma.pendingRegistration.updateMany({
+      where: { email },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/verify-email')
+      .send({ token })
+      .expect(401);
+    await expect(
+      prisma.user.findUnique({ where: { email } }),
+    ).resolves.toBeNull();
+    await prisma.pendingRegistration.deleteMany({ where: { email } });
+  });
+
+  it('confirma o e-mail de uma conta existente pelo link pedido no perfil', async () => {
+    const session = await account();
+    const cookie = `access_token=${session.accessToken}`;
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { emailVerifiedAt: null },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/email-verification')
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/email-verification')
+      .set('Cookie', cookie)
+      .expect(202);
+    const sent = () =>
+      sendEmailConfirmation.mock.calls.find(
+        ([to]) => to === session.user.email,
+      );
+    await waitFor(() => sent() !== undefined);
+
+    await request(app.getHttpServer())
+      .post('/auth/verify-email')
+      .send({ token: sent()?.[1] })
+      .expect(200)
+      .expect(({ headers }: { headers: Record<string, unknown> }) => {
+        expect(headers['set-cookie']).toBeUndefined();
+      });
+    await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Cookie', cookie)
+      .expect(200)
+      .expect(({ body }: { body: { emailVerifiedAt: unknown } }) => {
+        expect(body.emailVerifiedAt).toEqual(expect.any(String));
+      });
   });
 
   afterAll(async () => {

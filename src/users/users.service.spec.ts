@@ -17,12 +17,10 @@ describe('UsersService', () => {
     await expect(
       service.updateMe('user-a', { name: 'Novo nome' }),
     ).resolves.toMatchObject({ name: 'Novo nome' });
-    expect(prisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user-a' },
-        data: { name: 'Novo nome' },
-      }),
-    );
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-a' },
+      data: { name: 'Novo nome' },
+    });
   });
 
   it('não cria o perfil duas vezes quando outra solicitação já incluiu o papel', async () => {

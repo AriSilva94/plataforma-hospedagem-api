@@ -1,18 +1,15 @@
-import {
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { User } from '../generated/prisma/client';
-import { createHash, randomBytes } from 'crypto';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
-import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';
 import { PublicUser, toPublicUser } from '../users/public-user';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { EmailQueue } from './email-queue';
+import { EMAIL_VERIFICATION_VALIDITY_MINUTES } from './email-verification.policy';
 import { EmailService } from './email.service';
+import { generateToken, hashToken, minutesFromNow } from './one-time-token';
+import { PASSWORD_RESET_VALIDITY_MINUTES } from './password-reset.policy';
 import { PasswordService } from './password.service';
 import { AccessGrant, AuthTokens, TokenService } from './token.service';
 
@@ -25,38 +22,20 @@ export class AuthService {
     private readonly passwordService: PasswordService,
     private readonly tokenService: TokenService,
     private readonly emailService: EmailService,
+    private readonly emailQueue: EmailQueue,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResult> {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-
-    if (existingUser) {
-      throw new ConflictException('Já existe uma conta com este e-mail.');
-    }
-
+  async register(dto: RegisterDto): Promise<void> {
     const passwordHash = await this.passwordService.hash(dto.password);
-    let user: User;
-    try {
-      user = await this.prisma.$transaction(async (transaction) =>
-        transaction.user.create({
-          data: {
-            name: dto.name,
-            email: dto.email,
-            passwordHash,
-            roles: [],
-          },
-        }),
-      );
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new ConflictException('Já existe uma conta com este e-mail.');
-      }
-      throw error;
-    }
-    const tokens = await this.tokenService.createSession(user);
-    return { ...tokens, user: toPublicUser(user) };
+    const pending = await this.prisma.pendingRegistration.create({
+      data: {
+        name: dto.name,
+        email: dto.email,
+        passwordHash,
+        expiresAt: minutesFromNow(EMAIL_VERIFICATION_VALIDITY_MINUTES),
+      },
+    });
+    await this.emailQueue.enqueueRegistration(pending.id, pending.email);
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {
@@ -76,35 +55,46 @@ export class AuthService {
   }
 
   async requestPasswordReset(dto: ForgotPasswordDto): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    await this.emailQueue.enqueuePasswordReset(dto.email);
+  }
 
-    if (!user) {
+  async issuePasswordReset(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user || user.status !== 'ACTIVE') {
       return;
     }
 
-    const token = randomBytes(32).toString('hex');
-    await this.prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: this.hashToken(token),
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      },
+    const { token, tokenHash } = generateToken();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`;
+      await transaction.passwordResetToken.deleteMany({
+        where: { userId: user.id },
+      });
+      await transaction.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          tokenHash,
+          expiresAt: minutesFromNow(PASSWORD_RESET_VALIDITY_MINUTES),
+        },
+      });
     });
+
     await this.emailService.sendPasswordReset(user.email, token);
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
-    const tokenHash = this.hashToken(dto.token);
     const resetToken = await this.prisma.passwordResetToken.findUnique({
-      where: { tokenHash },
+      where: { tokenHash: hashToken(dto.token) },
+      include: { user: { select: { status: true, emailVerifiedAt: true } } },
     });
 
     if (
       !resetToken ||
       resetToken.usedAt ||
-      resetToken.expiresAt <= new Date()
+      resetToken.expiresAt <= new Date() ||
+      resetToken.user.status !== 'ACTIVE'
     ) {
       throw new UnauthorizedException(
         'O link de redefinição é inválido ou expirou.',
@@ -135,13 +125,20 @@ export class AuthService {
       });
       await transaction.user.update({
         where: { id: resetToken.userId },
-        data: { passwordHash },
+        data: {
+          passwordHash,
+          emailVerifiedAt: resetToken.user.emailVerifiedAt ?? new Date(),
+        },
+      });
+      await transaction.emailVerificationToken.deleteMany({
+        where: { userId: resetToken.userId },
       });
       await transaction.authSession.updateMany({
         where: { userId: resetToken.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
     });
+    await this.emailQueue.enqueuePasswordChanged(resetToken.userId);
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens | AccessGrant> {
@@ -150,9 +147,5 @@ export class AuthService {
 
   logout(refreshToken: string | undefined): Promise<void> {
     return this.tokenService.revokeSession(refreshToken);
-  }
-
-  private hashToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
   }
 }

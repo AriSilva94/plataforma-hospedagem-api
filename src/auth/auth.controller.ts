@@ -7,6 +7,7 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Request } from 'express';
@@ -16,6 +17,10 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { EmailVerificationService } from './email-verification.service';
+import type { AuthenticatedRequest } from './jwt-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { GoogleAuthService } from './google-auth.service';
@@ -28,6 +33,7 @@ export class AuthController {
     private readonly environmentService: EnvironmentService,
     private readonly googleAuthService: GoogleAuthService,
     private readonly tokenService: TokenService,
+    private readonly emailVerificationService: EmailVerificationService,
   ) {}
 
   @Get('google')
@@ -75,15 +81,36 @@ export class AuthController {
   }
 
   @Post('register')
+  @HttpCode(202)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async register(
-    @Body() dto: RegisterDto,
+  async register(@Body() dto: RegisterDto) {
+    await this.authService.register(dto);
+    return {
+      message: 'Enviamos um link de confirmação para o e-mail informado.',
+    };
+  }
+
+  @Post('verify-email')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async verifyEmail(
+    @Body() dto: VerifyEmailDto,
     @Res({ passthrough: true }) response: Response,
   ) {
-    return this.respondWithSession(
-      await this.authService.register(dto),
-      response,
-    );
+    const confirmation = await this.emailVerificationService.confirm(dto.token);
+    if (confirmation.kind === 'registered') {
+      this.setSessionCookies(response, confirmation.tokens);
+    }
+    return { verified: true };
+  }
+
+  @Post('email-verification')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  async requestEmailVerification(@Req() request: AuthenticatedRequest) {
+    await this.emailVerificationService.requestForUser(request.user.id);
+    return { message: 'Enviamos um link de confirmação para o seu e-mail.' };
   }
 
   @Post('login')
