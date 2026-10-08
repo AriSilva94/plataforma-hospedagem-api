@@ -1,8 +1,15 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsHexadecimal,
+  IsString,
+  Length,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class ResetPasswordDto {
   @IsString()
-  @MinLength(32)
+  @IsHexadecimal()
+  @Length(64, 64)
   token!: string;
 
   @IsString()
