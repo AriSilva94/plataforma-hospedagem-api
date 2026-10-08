@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Role, User } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import {
@@ -31,21 +27,13 @@ export class UsersService {
   }
 
   async updateMe(userId: string, dto: UpdateMeDto) {
-    const data = {
-      ...(dto.name ? { name: dto.name } : {}),
-      ...(dto.email ? { email: dto.email } : {}),
-    };
-
     try {
       const user = await this.prisma.user.update({
         where: { id: userId },
-        data,
+        data: dto.name ? { name: dto.name } : {},
       });
       return this.withProfiles(user);
     } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new ConflictException('Já existe uma conta com este e-mail.');
-      }
       if (isRecordNotFoundError(error)) {
         throw new NotFoundException('Usuário não encontrado.');
       }

@@ -6,6 +6,7 @@ import { App } from 'supertest/types';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
+import { EmailVerificationService } from './email-verification.service';
 import { GoogleAuthService } from './google-auth.service';
 import { TokenService } from './token.service';
 
@@ -34,7 +35,7 @@ describe('AuthController session cookies', () => {
           provide: AuthService,
           useValue: {
             login: jest.fn().mockResolvedValue({ ...tokens, user: {} }),
-            register: jest.fn().mockResolvedValue({ ...tokens, user: {} }),
+            register: jest.fn().mockResolvedValue(undefined),
             refresh,
             logout: jest.fn().mockResolvedValue(undefined),
           },
@@ -53,6 +54,14 @@ describe('AuthController session cookies', () => {
           useValue: { authorizationUrl, authenticateCallback },
         },
         { provide: TokenService, useValue: { createSession } },
+        {
+          provide: EmailVerificationService,
+          useValue: {
+            confirm: jest
+              .fn()
+              .mockResolvedValue({ kind: 'registered', tokens, user: {} }),
+          },
+        },
       ],
     }).compile();
     app = module.createNestApplication();
@@ -70,7 +79,16 @@ describe('AuthController session cookies', () => {
     domain = undefined;
   });
 
-  it.each(['login', 'register', 'refresh', 'logout'])(
+  it('não emite sessão no cadastro, que depende da confirmação do e-mail', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({});
+
+    expect(response.status).toBe(202);
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it.each(['login', 'verify-email', 'refresh', 'logout'])(
     'uses the shared domain for %s cookies',
     async (endpoint) => {
       domain = 'hml.example.com';

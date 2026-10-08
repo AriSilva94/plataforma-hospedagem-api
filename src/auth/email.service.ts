@@ -3,10 +3,13 @@ import * as nodemailer from 'nodemailer';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 import {
   EmailMessage,
+  accountExistsEmail,
+  emailConfirmationEmail,
   passwordChangedEmail,
   passwordResetEmail,
   welcomeEmail,
 } from './email-templates';
+import { EMAIL_VERIFICATION_VALIDITY_MINUTES } from './email-verification.policy';
 import { PASSWORD_RESET_VALIDITY_MINUTES } from './password-reset.policy';
 
 @Injectable()
@@ -40,6 +43,29 @@ export class EmailService implements OnApplicationShutdown {
     await this.send(
       email,
       welcomeEmail(name, this.frontendUrl('/perfil').toString()),
+    );
+  }
+
+  async sendEmailConfirmation(email: string, token: string): Promise<void> {
+    const confirmUrl = this.frontendUrl('/confirmar-email');
+    confirmUrl.hash = new URLSearchParams({ token }).toString();
+
+    await this.send(
+      email,
+      emailConfirmationEmail(
+        confirmUrl.toString(),
+        EMAIL_VERIFICATION_VALIDITY_MINUTES,
+      ),
+    );
+  }
+
+  async sendAccountExists(email: string): Promise<void> {
+    await this.send(
+      email,
+      accountExistsEmail(
+        this.frontendUrl('/login').toString(),
+        this.frontendUrl('/recuperar-senha').toString(),
+      ),
     );
   }
 

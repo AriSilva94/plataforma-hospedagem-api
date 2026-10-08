@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailQueue } from './email-queue';
+import { EmailVerificationService } from './email-verification.service';
 import { EmailService } from './email.service';
 import { EmailWorker } from './email-worker';
 import { GoogleAuthService } from './google-auth.service';
@@ -18,6 +19,7 @@ import { TokenService } from './token.service';
     TokenService,
     EmailService,
     EmailQueue,
+    EmailVerificationService,
     EmailWorker,
     JwtAuthGuard,
   ],

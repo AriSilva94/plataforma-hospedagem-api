@@ -9,6 +9,7 @@ import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { EmailService } from '../src/auth/email.service';
 import { TokenService } from '../src/auth/token.service';
+import { createVerifiedAccount, waitFor } from './support/e2e';
 import { GoogleAuthService } from '../src/auth/google-auth.service';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../src/infrastructure/redis/redis.module';
@@ -26,6 +27,12 @@ describe('Segurança de autenticação (e2e)', () => {
   const sendPasswordChanged = jest
     .fn<Promise<void>, [string]>()
     .mockResolvedValue(undefined);
+  const sendEmailConfirmation = jest
+    .fn<Promise<void>, [string, string]>()
+    .mockResolvedValue(undefined);
+  const sendAccountExists = jest
+    .fn<Promise<void>, [string]>()
+    .mockResolvedValue(undefined);
   const password = 'senha-segura-de-teste';
 
   beforeAll(async () => {
@@ -34,6 +41,8 @@ describe('Segurança de autenticação (e2e)', () => {
       .useValue({
         sendPasswordReset,
         sendPasswordChanged,
+        sendEmailConfirmation,
+        sendAccountExists,
         sendWelcome: jest.fn().mockResolvedValue(undefined),
       })
       .compile();
@@ -45,18 +54,8 @@ describe('Segurança de autenticação (e2e)', () => {
     tokens = app.get(TokenService);
   });
 
-  async function waitFor(condition: () => boolean): Promise<void> {
-    const deadline = Date.now() + 5000;
-    while (!condition()) {
-      if (Date.now() > deadline) {
-        throw new Error('A fila de e-mails não processou o job a tempo.');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
   async function account() {
-    const result = await auth.register({
+    const result = await createVerifiedAccount(app, {
       name: 'Teste de segurança',
       email: `review-${randomUUID()}@example.com`,
       password,
@@ -161,10 +160,12 @@ describe('Segurança de autenticação (e2e)', () => {
     await request(app.getHttpServer())
       .patch('/users/me')
       .set('Cookie', cookie)
-      .send({
-        name: '  Nome atualizado  ',
-        email: `  ${session.user.email.toUpperCase()}  `,
-      })
+      .send({ email: `outro-${randomUUID()}@example.com` })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch('/users/me')
+      .set('Cookie', cookie)
+      .send({ name: '  Nome atualizado  ' })
       .expect(200)
       .expect(({ body }: { body: unknown }) => {
         expect(body).toMatchObject({
@@ -409,6 +410,96 @@ describe('Segurança de autenticação (e2e)', () => {
       .post('/auth/reset-password')
       .send({ token: 'z'.repeat(64), password: 'outra-senha-segura' })
       .expect(400);
+  });
+
+  it('responde igual ao cadastro de e-mail já usado e avisa o titular sem criar conta', async () => {
+    const session = await account();
+
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ name: 'Outra pessoa', email: session.user.email, password })
+      .expect(202)
+      .expect({
+        message: 'Enviamos um link de confirmação para o e-mail informado.',
+      });
+
+    await waitFor(() =>
+      sendAccountExists.mock.calls.some(([to]) => to === session.user.email),
+    );
+    expect(
+      sendEmailConfirmation.mock.calls.some(
+        ([to]) => to === session.user.email,
+      ),
+    ).toBe(false);
+    await expect(
+      prisma.pendingRegistration.count({
+        where: { email: session.user.email },
+      }),
+    ).resolves.toBe(0);
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
+  it('recusa link de cadastro expirado sem criar conta', async () => {
+    const email = `expired-${randomUUID()}@example.com`;
+    await auth.register({ name: 'Cadastro expirado', email, password });
+    await waitFor(() =>
+      sendEmailConfirmation.mock.calls.some(([to]) => to === email),
+    );
+    const token = sendEmailConfirmation.mock.calls.find(
+      ([to]) => to === email,
+    )?.[1];
+    await prisma.pendingRegistration.updateMany({
+      where: { email },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/verify-email')
+      .send({ token })
+      .expect(401);
+    await expect(
+      prisma.user.findUnique({ where: { email } }),
+    ).resolves.toBeNull();
+    await prisma.pendingRegistration.deleteMany({ where: { email } });
+  });
+
+  it('confirma o e-mail de uma conta existente pelo link pedido no perfil', async () => {
+    const session = await account();
+    const cookie = `access_token=${session.accessToken}`;
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { emailVerifiedAt: null },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/email-verification')
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/email-verification')
+      .set('Cookie', cookie)
+      .expect(202);
+    const sent = () =>
+      sendEmailConfirmation.mock.calls.find(
+        ([to]) => to === session.user.email,
+      );
+    await waitFor(() => sent() !== undefined);
+
+    await request(app.getHttpServer())
+      .post('/auth/verify-email')
+      .send({ token: sent()?.[1] })
+      .expect(200)
+      .expect(({ headers }: { headers: Record<string, unknown> }) => {
+        expect(headers['set-cookie']).toBeUndefined();
+      });
+    await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Cookie', cookie)
+      .expect(200)
+      .expect(({ body }: { body: { emailVerifiedAt: unknown } }) => {
+        expect(body.emailVerifiedAt).toEqual(expect.any(String));
+      });
   });
 
   afterAll(async () => {

@@ -67,10 +67,13 @@ function divider(): string {
 </table>`;
 }
 
+function link(label: string, url: string): string {
+  return `<a href="${escapeHtml(url)}" target="_blank" style="color:${color.blueLight};text-decoration:underline;">${escapeHtml(label)}</a>`;
+}
+
 function fallbackLink(url: string): string {
-  const safeUrl = escapeHtml(url);
   return `${finePrint('Se o botão não abrir, copie e cole este endereço no navegador:', 6)}
-<p style="margin:0;font-family:${font.sans};font-size:14px;line-height:1.55;word-break:break-all;"><a href="${safeUrl}" target="_blank" style="color:${color.blueLight};text-decoration:underline;">${safeUrl}</a></p>`;
+<p style="margin:0;font-family:${font.sans};font-size:14px;line-height:1.55;word-break:break-all;">${link(url, url)}</p>`;
 }
 
 function layout(options: {
@@ -145,41 +148,63 @@ function formatValidity(minutes: number): string {
   return hours === 1 ? '1 hora' : `${hours} horas`;
 }
 
+function oneTimeLinkEmail(options: {
+  subject: string;
+  title: string;
+  request: string;
+  instruction?: string;
+  action: string;
+  url: string;
+  validityMinutes: number;
+  reassurance: string;
+  reason: string;
+}): EmailMessage {
+  const validityNote = `O link vale por ${formatValidity(options.validityMinutes)} e só pode ser usado uma vez.`;
+  const content = [
+    heading(options.title),
+    paragraph([options.request, options.instruction].filter(Boolean).join(' ')),
+    button(options.action, options.url),
+    `<div style="height:16px;line-height:16px;font-size:16px;">&nbsp;</div>`,
+    finePrint(validityNote),
+    divider(),
+    finePrint(`${strong(NOT_YOU)} ${options.reassurance}`, 20),
+    fallbackLink(options.url),
+  ].join('\n');
+
+  return {
+    subject: options.subject,
+    text: [
+      options.request,
+      '',
+      `${options.action}: ${options.url}`,
+      '',
+      validityNote,
+      `${NOT_YOU} ${options.reassurance}`,
+    ].join('\n'),
+    html: layout({
+      title: options.title,
+      preheader: validityNote,
+      content,
+      reason: options.reason,
+    }),
+  };
+}
+
 export function passwordResetEmail(
   resetUrl: string,
   validityMinutes: number,
 ): EmailMessage {
-  const validityNote = `O link vale por ${formatValidity(validityMinutes)} e só pode ser usado uma vez.`;
-  const request = `Recebemos um pedido para redefinir a senha da sua conta ${BRAND_NOWRAP}.`;
-  const reassurance = 'Ignore este e-mail. Sua senha continua a mesma.';
-  const content = [
-    heading('Redefina sua senha'),
-    paragraph(`${request} Use o botão abaixo para escolher uma nova.`),
-    button('Redefinir senha', resetUrl),
-    `<div style="height:16px;line-height:16px;font-size:16px;">&nbsp;</div>`,
-    finePrint(validityNote),
-    divider(),
-    finePrint(`${strong(NOT_YOU)} ${reassurance}`, 20),
-    fallbackLink(resetUrl),
-  ].join('\n');
-
-  return {
+  return oneTimeLinkEmail({
     subject: `Redefina sua senha da ${BRAND}`,
-    text: [
-      request,
-      '',
-      `Escolha uma nova senha: ${resetUrl}`,
-      '',
-      validityNote,
-      `${NOT_YOU} ${reassurance}`,
-    ].join('\n'),
-    html: layout({
-      title: 'Redefina sua senha',
-      preheader: validityNote,
-      content,
-      reason: `Você recebeu este e-mail porque foi pedida a redefinição de senha de uma conta ${BRAND_NOWRAP} com este endereço.`,
-    }),
-  };
+    title: 'Redefina sua senha',
+    request: `Recebemos um pedido para redefinir a senha da sua conta ${BRAND_NOWRAP}.`,
+    instruction: 'Use o botão abaixo para escolher uma nova.',
+    action: 'Redefinir senha',
+    url: resetUrl,
+    validityMinutes,
+    reassurance: 'Ignore este e-mail. Sua senha continua a mesma.',
+    reason: `Você recebeu este e-mail porque foi pedida a redefinição de senha de uma conta ${BRAND_NOWRAP} com este endereço.`,
+  });
 }
 
 export function passwordChangedEmail(recoverUrl: string): EmailMessage {
@@ -211,9 +236,13 @@ export function passwordChangedEmail(recoverUrl: string): EmailMessage {
   };
 }
 
+const PERSON_NAME = /^\p{L}[\p{L}'’-]{0,39}$/u;
+
 export function welcomeEmail(name: string, profileUrl: string): EmailMessage {
   const firstName = name.trim().split(/\s+/)[0];
-  const greeting = firstName ? `Boas-vindas, ${firstName}.` : 'Boas-vindas.';
+  const greeting = PERSON_NAME.test(firstName)
+    ? `Boas-vindas, ${firstName}.`
+    : 'Boas-vindas.';
   const intro = `Sua conta ${BRAND_NOWRAP} está criada. Falta só dizer como você vai usar a plataforma: como hóspede, como proprietário ou os dois.`;
   const content = [
     heading(greeting),
@@ -240,6 +269,62 @@ export function welcomeEmail(name: string, profileUrl: string): EmailMessage {
         'Sua conta está criada. Escolha seu perfil para começar a usar.',
       content,
       reason: `Você recebeu este e-mail porque uma conta ${BRAND_NOWRAP} foi criada com este endereço.`,
+    }),
+  };
+}
+
+export function emailConfirmationEmail(
+  confirmUrl: string,
+  validityMinutes: number,
+): EmailMessage {
+  return oneTimeLinkEmail({
+    subject: `Confirme seu e-mail na ${BRAND}`,
+    title: 'Confirme seu e-mail',
+    request: `Confirme que este e-mail é seu para usar a ${BRAND_NOWRAP}.`,
+    action: 'Confirmar e-mail',
+    url: confirmUrl,
+    validityMinutes,
+    reassurance:
+      'Ignore este e-mail. Nada acontece com este endereço sem a confirmação.',
+    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
+  });
+}
+
+export function accountExistsEmail(
+  loginUrl: string,
+  recoverUrl: string,
+): EmailMessage {
+  const summary = `Alguém tentou criar uma conta ${BRAND_NOWRAP} com este e-mail, mas ele já tem uma conta. Nenhuma conta nova foi criada.`;
+  const forgot = 'Esqueceu a senha?';
+  const reassurance =
+    'Ignore este e-mail. Sua conta e sua senha continuam as mesmas.';
+  const content = [
+    heading('Você já tem uma conta'),
+    paragraph(summary),
+    button('Entrar', loginUrl),
+    divider(),
+    finePrint(
+      `${strong(forgot)} ${link('Redefina sua senha', recoverUrl)}.`,
+      14,
+    ),
+    finePrint(`${strong(NOT_YOU)} ${reassurance}`),
+  ].join('\n');
+
+  return {
+    subject: `Você já tem uma conta na ${BRAND}`,
+    text: [
+      summary,
+      '',
+      `Entrar: ${loginUrl}`,
+      `${forgot} Redefina sua senha: ${recoverUrl}`,
+      '',
+      `${NOT_YOU} ${reassurance}`,
+    ].join('\n'),
+    html: layout({
+      title: 'Você já tem uma conta',
+      preheader: 'Nenhuma conta nova foi criada. Entre com a que você já tem.',
+      content,
+      reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
     }),
   };
 }

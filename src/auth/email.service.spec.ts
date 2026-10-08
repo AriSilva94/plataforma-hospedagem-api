@@ -92,16 +92,59 @@ describe('EmailService', () => {
     );
   });
 
-  it('escapa o nome do usuário no e-mail de boas-vindas', async () => {
+  it.each(['<b>Ana</b> Silva', 'https://evil.example/premio Ana', '123'])(
+    'não repete no e-mail de boas-vindas um nome que não parece nome: %s',
+    async (name) => {
+      const { service, sendMail } = createService();
+
+      await service.sendWelcome('guest@example.com', name);
+
+      const message = sendMail.mock.calls[0][0];
+      expect(message.html).toContain('>Boas-vindas.</h1>');
+      expect(message.html).not.toContain('evil.example');
+      expect(message.html).not.toContain('<b>Ana</b>');
+      expect(message.text).not.toContain('evil.example');
+    },
+  );
+
+  it('saúda pelo primeiro nome no e-mail de boas-vindas', async () => {
     const { service, sendMail } = createService();
 
-    await service.sendWelcome('guest@example.com', '<b>Ana</b> Silva');
+    await service.sendWelcome('guest@example.com', "D'Ávila Souza");
 
     const message = sendMail.mock.calls[0][0];
-    expect(message.html).toContain('Boas-vindas, &lt;b&gt;Ana&lt;/b&gt;.');
-    expect(message.html).not.toContain('<b>Ana</b>');
+    expect(message.html).toContain('Boas-vindas, D&#39;Ávila.');
     expect(message.html).toContain(
       'href="https://domusx-dev.arisilva.tech/perfil"',
+    );
+  });
+
+  it('envia a confirmação de e-mail com o token no fragmento do link', async () => {
+    const { service, sendMail } = createService();
+
+    await service.sendEmailConfirmation('guest@example.com', 'token');
+
+    const message = sendMail.mock.calls[0][0];
+    const confirmUrl =
+      'https://domusx-dev.arisilva.tech/confirmar-email#token=token';
+    expect(message.subject).toBe('Confirme seu e-mail na DOMUS X');
+    expect(message.text).toContain(confirmUrl);
+    expect(message.html).toContain(`href="${confirmUrl}"`);
+    expect(message.text).toContain('O link vale por 24 horas');
+  });
+
+  it('avisa o titular quando tentam cadastrar um e-mail que já tem conta', async () => {
+    const { service, sendMail } = createService();
+
+    await service.sendAccountExists('guest@example.com');
+
+    const message = sendMail.mock.calls[0][0];
+    expect(message.subject).toBe('Você já tem uma conta na DOMUS X');
+    expect(message.html).toContain(
+      'href="https://domusx-dev.arisilva.tech/login"',
+    );
+    expect(message.html).toContain(
+      'href="https://domusx-dev.arisilva.tech/recuperar-senha"',
     );
   });
 });

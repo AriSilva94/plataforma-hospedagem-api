@@ -5,6 +5,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { EnvironmentService } from '../infrastructure/environment/environment.service';
 import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { EmailQueue } from './email-queue';
 
 type GoogleTokenResponse = { id_token: string };
 type GoogleIdentity = { subject: string; email: string; name: string };
@@ -20,6 +21,7 @@ export class GoogleAuthService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly emailQueue: EmailQueue,
     environment: EnvironmentService,
   ) {
     this.clientId = environment.getOrThrow('GOOGLE_CLIENT_ID');
@@ -51,38 +53,67 @@ export class GoogleAuthService {
     };
 
     try {
-      return await this.prisma.$transaction(async (transaction) => {
-        const existingIdentity =
-          await transaction.externalAuthIdentity.findUnique({
-            where,
-            include: { user: true },
-          });
-        if (existingIdentity) {
-          return existingIdentity.user;
-        }
+      let createdUserId: string | undefined;
+      const authenticatedUser = await this.prisma.$transaction(
+        async (transaction) => {
+          const existingIdentity =
+            await transaction.externalAuthIdentity.findUnique({
+              where,
+              include: { user: true },
+            });
+          if (existingIdentity) {
+            return existingIdentity.user;
+          }
 
-        const user =
-          (await transaction.user.findUnique({
+          const existingUser = await transaction.user.findUnique({
             where: { email: identity.email },
-          })) ??
-          (await transaction.user.create({
-            data: {
-              name: identity.name,
-              email: identity.email,
-              passwordHash: null,
-              roles: [],
-            },
-          }));
+          });
+          let user: User;
+          if (existingUser) {
+            await transaction.authSession.updateMany({
+              where: { userId: existingUser.id, revokedAt: null },
+              data: { revokedAt: new Date() },
+            });
+            await transaction.passwordResetToken.deleteMany({
+              where: { userId: existingUser.id },
+            });
+            user = await transaction.user.update({
+              where: { id: existingUser.id },
+              data: {
+                passwordHash: null,
+                emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
+              },
+            });
+            await transaction.emailVerificationToken.deleteMany({
+              where: { userId: existingUser.id },
+            });
+          } else {
+            user = await transaction.user.create({
+              data: {
+                name: identity.name,
+                email: identity.email,
+                passwordHash: null,
+                emailVerifiedAt: new Date(),
+                roles: [],
+              },
+            });
+            createdUserId = user.id;
+          }
 
-        await transaction.externalAuthIdentity.create({
-          data: {
-            provider: AuthProvider.GOOGLE,
-            providerSubject: identity.subject,
-            userId: user.id,
-          },
-        });
-        return user;
-      });
+          await transaction.externalAuthIdentity.create({
+            data: {
+              provider: AuthProvider.GOOGLE,
+              providerSubject: identity.subject,
+              userId: user.id,
+            },
+          });
+          return user;
+        },
+      );
+      if (createdUserId) {
+        await this.emailQueue.enqueueWelcome(createdUserId);
+      }
+      return authenticatedUser;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         const persistedIdentity =

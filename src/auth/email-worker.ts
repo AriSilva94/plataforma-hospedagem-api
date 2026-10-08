@@ -15,6 +15,7 @@ import {
   EmailJobs,
   queuePrefix,
 } from './email-queue';
+import { EmailVerificationService } from './email-verification.service';
 import { EmailService } from './email.service';
 
 type EmailJob = Job<EmailJobData, void, EmailJobName>;
@@ -29,6 +30,7 @@ export class EmailWorker implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
     private readonly emailService: EmailService,
+    private readonly emailVerificationService: EmailVerificationService,
   ) {}
 
   onModuleInit(): void {
@@ -61,6 +63,16 @@ export class EmailWorker implements OnModuleInit, OnModuleDestroy {
       case 'password-reset': {
         const { email } = job.data as EmailJobs['password-reset'];
         return this.authService.issuePasswordReset(email);
+      }
+      case 'registration': {
+        const { pendingRegistrationId } = job.data as EmailJobs['registration'];
+        return this.emailVerificationService.issueForRegistration(
+          pendingRegistrationId,
+        );
+      }
+      case 'email-verification': {
+        const { userId } = job.data as EmailJobs['email-verification'];
+        return this.emailVerificationService.issueForUser(userId);
       }
       case 'welcome': {
         const user = await this.findActiveUser(job);

@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
 
@@ -32,6 +28,9 @@ describe('AuthService', () => {
       passwordResetToken: {
         findUnique: jest.fn(),
       },
+      pendingRegistration: {
+        create: jest.fn(),
+      },
       $transaction: jest.fn(),
     };
     const passwordService = {
@@ -50,6 +49,7 @@ describe('AuthService', () => {
     };
     const queue = {
       enqueueWelcome: jest.fn().mockResolvedValue(undefined),
+      enqueueRegistration: jest.fn().mockResolvedValue(undefined),
       enqueuePasswordReset: jest.fn().mockResolvedValue(undefined),
       enqueuePasswordChanged: jest.fn().mockResolvedValue(undefined),
     };
@@ -70,86 +70,29 @@ describe('AuthService', () => {
     };
   }
 
-  it('cria um usuário sem perfil inicial e uma sessão', async () => {
-    const { service, prisma, tokens } = createService();
-    const registeredUser = { ...user, roles: [] };
-    const createUser = jest.fn().mockResolvedValue(registeredUser);
-    prisma.user.findUnique.mockResolvedValue(null);
-    prisma.$transaction.mockImplementation(
-      (callback: (tx: unknown) => unknown) =>
-        callback({ user: { create: createUser } }),
-    );
-    tokens.createSession.mockResolvedValue({
-      accessToken: 'access',
-      refreshToken: 'refresh',
+  it('guarda o cadastro como pendente e enfileira a confirmação sem criar conta', async () => {
+    const { service, prisma, queue, tokens } = createService();
+    prisma.pendingRegistration.create.mockResolvedValue({
+      id: 'pending-id',
+      email: user.email,
     });
 
-    await expect(service.register(registration)).resolves.toMatchObject({
-      user: { email: user.email, roles: [] },
-      accessToken: 'access',
-    });
-    expect(createUser).toHaveBeenCalledWith({
+    await expect(service.register(registration)).resolves.toBeUndefined();
+
+    expect(prisma.pendingRegistration.create).toHaveBeenCalledWith({
       data: {
         name: user.name,
         email: user.email,
         passwordHash: 'hashed-password',
-        roles: [],
+        expiresAt: expect.any(Date) as Date,
       },
     });
-    expect(tokens.createSession).toHaveBeenCalledWith(registeredUser);
-  });
-
-  function mockSuccessfulRegistration({
-    prisma,
-    tokens,
-  }: ReturnType<typeof createService>) {
-    prisma.user.findUnique.mockResolvedValue(null);
-    prisma.$transaction.mockImplementation(
-      (callback: (tx: unknown) => unknown) =>
-        callback({
-          user: { create: jest.fn().mockResolvedValue({ ...user, roles: [] }) },
-        }),
+    expect(queue.enqueueRegistration).toHaveBeenCalledWith(
+      'pending-id',
+      user.email,
     );
-    tokens.createSession.mockResolvedValue({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-    });
-  }
-
-  it('enfileira o e-mail de boas-vindas após o cadastro', async () => {
-    const context = createService();
-    mockSuccessfulRegistration(context);
-
-    await context.service.register(registration);
-
-    expect(context.queue.enqueueWelcome).toHaveBeenCalledWith(user.id);
-    expect(context.email.sendWelcome).not.toHaveBeenCalled();
-  });
-
-  it('conclui o cadastro mesmo quando a fila de e-mails está indisponível', async () => {
-    const context = createService();
-    mockSuccessfulRegistration(context);
-    context.queue.enqueueWelcome.mockRejectedValue(
-      new Error('Redis indisponível'),
-    );
-    const logError = jest
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(() => undefined);
-
-    await expect(context.service.register(registration)).resolves.toMatchObject(
-      { accessToken: 'access' },
-    );
-    expect(logError).toHaveBeenCalled();
-    logError.mockRestore();
-  });
-
-  it('não cria duas contas para o mesmo e-mail', async () => {
-    const { service, prisma } = createService();
-    prisma.user.findUnique.mockResolvedValue(user);
-
-    await expect(service.register(registration)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(tokens.createSession).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -189,7 +132,10 @@ describe('AuthService', () => {
   it.each([
     ['expirado', { expiresAt: new Date(Date.now() - 1000) }],
     ['já usado', { usedAt: new Date() }],
-    ['de conta inativa', { user: { email: user.email, status: 'INACTIVE' } }],
+    [
+      'de conta inativa',
+      { user: { status: 'INACTIVE', emailVerifiedAt: null } },
+    ],
   ])('rejeita token de redefinição %s', async (_case, overrides) => {
     const { service, prisma, passwordService } = createService();
     const hash = jest.fn();
@@ -199,7 +145,7 @@ describe('AuthService', () => {
       userId: user.id,
       usedAt: null,
       expiresAt: new Date(Date.now() + 60_000),
-      user: { email: user.email, status: 'ACTIVE' },
+      user: { status: 'ACTIVE', emailVerifiedAt: null },
       ...overrides,
     });
 
