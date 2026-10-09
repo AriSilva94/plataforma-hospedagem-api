@@ -15,14 +15,12 @@ describe('EmailService', () => {
     const environmentService = {
       get: jest.fn(
         (name: string) =>
-          ({ SMTP_USER: 'auth@arisilva.tech', SMTP_PASSWORD: 'password' })[
-            name
-          ],
+          ({ SMTP_USER: 'resend', SMTP_PASSWORD: 'password' })[name],
       ),
       getOrThrow: jest.fn(
         (name: string) =>
           ({
-            SMTP_HOST: 'smtp.hostinger.com',
+            SMTP_HOST: 'smtp.resend.com',
             SMTP_PORT: '465',
             SMTP_SECURE: 'true',
             EMAIL_FROM: 'DOMUS X <auth@arisilva.tech>',
@@ -45,10 +43,10 @@ describe('EmailService', () => {
 
     expect(createTransport).toHaveBeenCalledWith(
       expect.objectContaining({
-        host: 'smtp.hostinger.com',
+        host: 'smtp.resend.com',
         port: 465,
         secure: true,
-        auth: { user: 'auth@arisilva.tech', pass: 'password' },
+        auth: { user: 'resend', pass: 'password' },
       }),
     );
     expect(sendMail).toHaveBeenCalledWith(
