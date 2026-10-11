@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
 
@@ -156,6 +156,35 @@ describe('AuthService', () => {
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(hash).not.toHaveBeenCalled();
+  });
+
+  it('recusa a troca de senha com senha atual incorreta sem gravar nada', async () => {
+    const { service, prisma, passwordService, queue } = createService();
+    prisma.user.findUnique.mockResolvedValue(user);
+    passwordService.verify = jest.fn().mockResolvedValue(false);
+
+    await expect(
+      service.changePassword(user.id, {
+        currentPassword: 'wrong-password',
+        newPassword: 'another-safe-password',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(queue.enqueuePasswordChanged).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['sem informar a senha', {}],
+    ['com senha incorreta', { currentPassword: 'wrong-password' }],
+  ])('recusa desativar conta com senha %s', async (_case, dto) => {
+    const { service, prisma, passwordService } = createService();
+    prisma.user.findUnique.mockResolvedValue(user);
+    passwordService.verify = jest.fn().mockResolvedValue(false);
+
+    await expect(
+      service.deactivateAccount(user.id, dto),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejeita login com senha inválida sem expor a existência da conta', async () => {

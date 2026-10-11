@@ -13,6 +13,8 @@ import type { Response } from 'express';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthResult, AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { DeactivateAccountDto } from './dto/deactivate-account.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -147,8 +149,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     await this.authService.logout(this.getCookie(request, 'refresh_token'));
-    response.clearCookie('access_token', this.cookieOptions());
-    response.clearCookie('refresh_token', this.cookieOptions());
+    this.clearSessionCookies(response);
   }
 
   @Post('forgot-password')
@@ -167,6 +168,34 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Post('change-password')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async changePassword(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    this.setSessionCookies(
+      response,
+      await this.authService.changePassword(request.user.id, dto),
+    );
+  }
+
+  @Post('deactivate-account')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async deactivateAccount(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: DeactivateAccountDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.authService.deactivateAccount(request.user.id, dto);
+    this.clearSessionCookies(response);
   }
 
   private respondWithSession(result: AuthResult, response: Response) {
@@ -188,6 +217,11 @@ export class AuthController {
         maxAge: tokens.refreshTokenExpiresAt.getTime() - Date.now(),
       });
     }
+  }
+
+  private clearSessionCookies(response: Response): void {
+    response.clearCookie('access_token', this.cookieOptions());
+    response.clearCookie('refresh_token', this.cookieOptions());
   }
 
   private cookieOptions() {

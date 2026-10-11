@@ -413,6 +413,169 @@ describe('Segurança de autenticação (e2e)', () => {
     await expect(tokens.rotateSession(session.refreshToken)).rejects.toThrow();
   });
 
+  it('altera a senha com a senha atual, troca a sessão e avisa o titular', async () => {
+    const session = await account();
+    const other = await tokens.createSession(session.user);
+    const cookie = `access_token=${session.accessToken}`;
+    const newPassword = 'nova-senha-segura';
+    await auth.issuePasswordReset(session.user.email);
+
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .send({ currentPassword: password, newPassword })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Cookie', cookie)
+      .send({ currentPassword: password, newPassword: 'curta' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Cookie', cookie)
+      .send({ currentPassword: 'senha-errada', newPassword })
+      .expect(400);
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+
+    const response = await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Cookie', cookie)
+      .send({ currentPassword: password, newPassword })
+      .expect(204);
+
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+    const newAccessToken = cookies
+      .find((value) => value.startsWith('access_token='))
+      ?.split(';')[0]
+      .slice('access_token='.length);
+    expect(cookies).toEqual(
+      expect.arrayContaining([expect.stringContaining('refresh_token=')]),
+    );
+    await expect(tokens.authenticate(newAccessToken ?? '')).resolves.toEqual(
+      expect.objectContaining({ id: session.user.id }),
+    );
+    await expect(tokens.authenticate(session.accessToken)).rejects.toThrow();
+    await expect(tokens.authenticate(other.accessToken)).rejects.toThrow();
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).rejects.toThrow();
+    await expect(
+      auth.login({ email: session.user.email, password: newPassword }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+    expect(
+      await prisma.passwordResetToken.count({
+        where: { userId: session.user.id },
+      }),
+    ).toBe(0);
+    await waitFor(() =>
+      sendPasswordChanged.mock.calls.some(
+        ([email]) => email === session.user.email,
+      ),
+    );
+  });
+
+  it('informa se a conta tem senha e recusa a troca em conta sem senha', async () => {
+    const session = await account();
+    const cookie = `access_token=${session.accessToken}`;
+    const hasPassword = async () => {
+      const response = await request(app.getHttpServer())
+        .get('/users/me')
+        .set('Cookie', cookie)
+        .expect(200);
+      return (response.body as { hasPassword: unknown }).hasPassword;
+    };
+
+    await expect(hasPassword()).resolves.toBe(true);
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { passwordHash: null },
+    });
+    await expect(hasPassword()).resolves.toBe(false);
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Cookie', cookie)
+      .send({ currentPassword: password, newPassword: 'nova-senha-segura' })
+      .expect(400);
+  });
+
+  it('desativa a própria conta com a senha atual e encerra todo o acesso', async () => {
+    const session = await account();
+    const other = await tokens.createSession(session.user);
+    const cookie = `access_token=${session.accessToken}`;
+    await auth.issuePasswordReset(session.user.email);
+
+    await request(app.getHttpServer())
+      .post('/auth/deactivate-account')
+      .send({ currentPassword: password })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/deactivate-account')
+      .set('Cookie', cookie)
+      .send({})
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/auth/deactivate-account')
+      .set('Cookie', cookie)
+      .send({ currentPassword: 'senha-errada' })
+      .expect(400);
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: session.user.id } }),
+    ).resolves.toMatchObject({ status: 'ACTIVE' });
+
+    const response = await request(app.getHttpServer())
+      .post('/auth/deactivate-account')
+      .set('Cookie', cookie)
+      .send({ currentPassword: password })
+      .expect(204);
+
+    expect(response.headers['set-cookie']).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('access_token=;'),
+        expect.stringContaining('refresh_token=;'),
+      ]),
+    );
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: session.user.id } }),
+    ).resolves.toMatchObject({ status: 'INACTIVE' });
+    expect(
+      await prisma.authSession.count({
+        where: { userId: session.user.id, revokedAt: null },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.passwordResetToken.count({
+        where: { userId: session.user.id },
+      }),
+    ).toBe(0);
+    await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Cookie', cookie)
+      .expect(401);
+    await expect(tokens.authenticate(other.accessToken)).rejects.toThrow();
+    await expect(tokens.rotateSession(session.refreshToken)).rejects.toThrow();
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).rejects.toThrow();
+  });
+
+  it('desativa conta sem senha apenas com a sessão', async () => {
+    const session = await account();
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { passwordHash: null },
+    });
+
+    await request(app.getHttpServer())
+      .post('/auth/deactivate-account')
+      .set('Cookie', `access_token=${session.accessToken}`)
+      .send({})
+      .expect(204);
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: session.user.id } }),
+    ).resolves.toMatchObject({ status: 'INACTIVE' });
+  });
+
   it('recupera a senha, impede reutilização do token e revoga sessões', async () => {
     const session = await account();
     const sentTokens = () =>
