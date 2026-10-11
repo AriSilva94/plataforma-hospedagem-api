@@ -1,6 +1,12 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { PublicUser, toPublicUser } from '../users/public-user';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { DeactivateAccountDto } from './dto/deactivate-account.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -139,6 +145,84 @@ export class AuthService {
       });
     });
     await this.emailQueue.enqueuePasswordChanged(resetToken.userId);
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<AuthTokens> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user) {
+      throw new UnauthorizedException('Sessão inválida ou expirada.');
+    }
+    if (!user.passwordHash) {
+      throw new BadRequestException(
+        'Esta conta ainda não tem senha. Use a recuperação de senha para definir uma.',
+      );
+    }
+    if (
+      !(await this.passwordService.verify(
+        user.passwordHash,
+        dto.currentPassword,
+      ))
+    ) {
+      throw new BadRequestException('Senha atual incorreta.');
+    }
+
+    const passwordHash = await this.passwordService.hash(dto.newPassword);
+    const tokens = await this.prisma.$transaction(async (transaction) => {
+      await transaction.user.update({
+        where: { id: userId },
+        data: { passwordHash },
+      });
+      await transaction.passwordResetToken.deleteMany({ where: { userId } });
+      await transaction.authSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return this.tokenService.createSession(user, transaction);
+    });
+    await this.emailQueue.enqueuePasswordChanged(userId);
+    return tokens;
+  }
+
+  async deactivateAccount(
+    userId: string,
+    dto: DeactivateAccountDto,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user) {
+      throw new UnauthorizedException('Sessão inválida ou expirada.');
+    }
+    if (
+      user.passwordHash &&
+      !(
+        dto.currentPassword &&
+        (await this.passwordService.verify(
+          user.passwordHash,
+          dto.currentPassword,
+        ))
+      )
+    ) {
+      throw new BadRequestException('Senha atual incorreta.');
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.user.update({
+        where: { id: userId },
+        data: { status: 'INACTIVE' },
+      });
+      await transaction.authSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await transaction.passwordResetToken.deleteMany({ where: { userId } });
+      await transaction.emailVerificationToken.deleteMany({
+        where: { userId },
+      });
+    });
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens | AccessGrant> {
