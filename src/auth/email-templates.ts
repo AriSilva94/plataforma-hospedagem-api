@@ -17,8 +17,7 @@ const color = {
   blueLight: '#3a83f0',
   white: '#f4f6f8',
   gray: '#b2bbc8',
-  muted: '#9aabc1',
-  tagline: '#b6d1ff',
+  bluePale: '#b6d1ff',
 };
 
 const font = {
@@ -114,8 +113,8 @@ body { margin: 0; padding: 0; }
 <td style="padding:0 4px 24px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
 <tr>
-<td width="32" height="32" align="center" valign="middle" bgcolor="${color.blue}" style="width:32px;height:32px;border-radius:10px;background-color:${color.blue};font-family:${font.sans};font-size:14px;line-height:32px;font-weight:800;color:#ffffff;">D</td>
-<td valign="middle" style="padding-left:10px;font-family:${font.sans};font-size:16px;line-height:32px;font-weight:800;color:#ffffff;">${BRAND}</td>
+<td width="32" height="32" align="center" valign="middle" bgcolor="${color.blue}" style="width:32px;height:32px;border-radius:10px;background-color:${color.blue};font-family:${font.sans};font-size:14px;line-height:32px;font-weight:800;color:${color.white};">D</td>
+<td valign="middle" style="padding-left:10px;font-family:${font.sans};font-size:16px;line-height:32px;font-weight:800;color:${color.white};">${BRAND}</td>
 </tr>
 </table>
 </td>
@@ -127,9 +126,9 @@ ${options.content}
 </tr>
 <tr>
 <td style="padding:28px 4px 0;">
-<p style="margin:0 0 12px;font-family:${font.serif};font-size:16px;line-height:1.4;color:${color.tagline};">${TAGLINE}</p>
-<p style="margin:0 0 6px;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.muted};">${escapeHtml(options.reason)}</p>
-<p style="margin:0;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.muted};">&copy; ${year} ${BRAND_NOWRAP}. Todos os direitos reservados.</p>
+<p style="margin:0 0 12px;font-family:${font.serif};font-size:16px;line-height:1.4;color:${color.bluePale};">${TAGLINE}</p>
+<p style="margin:0 0 6px;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.gray};">${escapeHtml(options.reason)}</p>
+<p style="margin:0;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.gray};">&copy; ${year} ${BRAND_NOWRAP}. Todos os direitos reservados.</p>
 </td>
 </tr>
 </table>

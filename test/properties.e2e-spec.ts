@@ -93,6 +93,30 @@ describe('Imóveis e quartos (e2e)', () => {
       .expect([]);
   });
 
+  it('exige dados pessoais completos para cadastrar imóvel e os mantém depois', async () => {
+    const owner = await account();
+    const patchMe = (body: Body) =>
+      http().patch('/users/me').set('Cookie', owner).send(body);
+    const postProperty = () =>
+      http()
+        .post('/owner/properties')
+        .set('Cookie', owner)
+        .send({ title: 'Casa', type: 'HOUSE' });
+
+    await patchMe({ phone: null }).expect(200);
+    await postProperty().expect(422);
+
+    await patchMe({ phone: '(11) 91234-5678' }).expect(200);
+    await postProperty().expect(201);
+
+    await patchMe({ city: null }).expect(422);
+    await patchMe({ city: 'Campinas', name: 'Novo nome' })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({ city: 'Campinas', name: 'Novo nome' });
+      });
+  });
+
   it('cria rascunho sem expor o vínculo interno do proprietário', async () => {
     const owner = await account();
     const property = await createProperty(owner, {

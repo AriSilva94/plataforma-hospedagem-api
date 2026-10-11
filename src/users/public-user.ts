@@ -6,11 +6,14 @@ export type PublicUser = Pick<
   | 'name'
   | 'email'
   | 'emailVerifiedAt'
+  | 'phone'
+  | 'city'
+  | 'state'
   | 'status'
   | 'roles'
   | 'createdAt'
   | 'updatedAt'
->;
+> & { birthDate: string | null };
 
 export function toPublicUser(user: User): PublicUser {
   return {
@@ -18,6 +21,10 @@ export function toPublicUser(user: User): PublicUser {
     name: user.name,
     email: user.email,
     emailVerifiedAt: user.emailVerifiedAt,
+    phone: user.phone,
+    birthDate: user.birthDate?.toISOString().slice(0, 10) ?? null,
+    city: user.city,
+    state: user.state,
     status: user.status,
     roles: user.roles,
     createdAt: user.createdAt,
