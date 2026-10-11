@@ -48,6 +48,13 @@ export const publishableAddress = {
   state: 'SP',
 };
 
+export const listingPersonalData = {
+  phone: '+5511912345678',
+  birthDate: new Date('1990-05-10'),
+  city: 'São Paulo',
+  state: 'SP',
+};
+
 export const roomInput = {
   title: 'Suíte',
   priceCents: 15000,
@@ -115,6 +122,10 @@ export class TestAccounts {
       password: 'senha-segura-de-teste',
     });
     this.userIds.push(result.user.id);
+    await this.app.get(PrismaService).user.update({
+      where: { id: result.user.id },
+      data: listingPersonalData,
+    });
     for (const role of roles) {
       await this.app.get(UsersService).addProfile(result.user.id, role);
     }

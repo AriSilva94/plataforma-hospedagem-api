@@ -6,6 +6,7 @@ import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
 import { FavoritesModule } from './favorites/favorites.module';
+import { LocationsModule } from './locations/locations.module';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
 import { EnvironmentModule } from './infrastructure/environment/environment.module';
 import { EnvironmentService } from './infrastructure/environment/environment.service';
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module';
     RoomsModule,
     AdminModule,
     FavoritesModule,
+    LocationsModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ClientIpThrottlerGuard }],

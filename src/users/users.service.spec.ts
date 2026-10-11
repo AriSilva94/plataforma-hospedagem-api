@@ -1,4 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 
 describe('UsersService', () => {
@@ -20,8 +24,101 @@ describe('UsersService', () => {
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-a' },
       data: { name: 'Novo nome' },
+      include: { guestProfile: true, ownerProfile: true },
     });
   });
+
+  it('grava e limpa os dados pessoais opcionais', async () => {
+    const prisma = {
+      user: {
+        update: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn().mockResolvedValue({
+          city: 'Recife',
+          ownerProfile: { _count: { properties: 0 } },
+        }),
+      },
+    };
+    const service = new UsersService(prisma as never);
+
+    await service.updateMe('user-a', {
+      phone: '+5511912345678',
+      birthDate: '1990-05-10',
+      city: null,
+      state: 'SP',
+    });
+    await expect(
+      service.updateMe('user-a', { state: 'SP' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          phone: '+5511912345678',
+          birthDate: new Date('1990-05-10'),
+          city: null,
+          state: 'SP',
+        },
+      }),
+    );
+  });
+
+  it('impede quem tem imóveis de apagar dados exigidos para anunciar', async () => {
+    const prisma = {
+      user: {
+        update: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({
+          phone: '+5511912345678',
+          birthDate: new Date('1990-05-10'),
+          city: 'Recife',
+          state: 'PE',
+          ownerProfile: { _count: { properties: 1 } },
+        }),
+      },
+    };
+    const service = new UsersService(prisma as never);
+
+    await expect(
+      service.updateMe('user-a', { city: null }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('aceita quem completa 18 anos hoje e recusa quem ainda não completou', async () => {
+    const prisma = { user: { update: jest.fn().mockResolvedValue({}) } };
+    const service = new UsersService(prisma as never);
+    const eighteenthBirthday = (daysFromToday: number) => {
+      const now = new Date();
+      return new Date(
+        Date.UTC(
+          now.getUTCFullYear() - 18,
+          now.getUTCMonth(),
+          now.getUTCDate() + daysFromToday,
+        ),
+      )
+        .toISOString()
+        .slice(0, 10);
+    };
+
+    await expect(
+      service.updateMe('user-a', { birthDate: eighteenthBirthday(0) }),
+    ).resolves.toBeDefined();
+    await expect(
+      service.updateMe('user-a', { birthDate: eighteenthBirthday(1) }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each(['1899-12-31', '2999-01-01'])(
+    'recusa a data de nascimento %s',
+    async (birthDate) => {
+      const prisma = { user: { update: jest.fn() } };
+      const service = new UsersService(prisma as never);
+
+      await expect(
+        service.updateMe('user-a', { birthDate }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('não cria o perfil duas vezes quando outra solicitação já incluiu o papel', async () => {
     const transaction = {

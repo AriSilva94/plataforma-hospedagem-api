@@ -19,6 +19,10 @@ import {
 } from '../media/media.service';
 import { evaluateCompleteness } from '../ranking/room-completeness';
 import { RoomRankingService } from '../ranking/room-ranking.service';
+import {
+  hasListingPersonalData,
+  listingPersonalDataSelect,
+} from '../users/personal-data';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
@@ -106,11 +110,16 @@ export class PropertiesService {
   async create(userId: string, dto: CreatePropertyDto) {
     const ownerProfile = await this.prisma.ownerProfile.findUnique({
       where: { userId },
-      select: { id: true },
+      select: { id: true, user: { select: listingPersonalDataSelect } },
     });
     if (!ownerProfile) {
       throw new ForbiddenException(
         'Adicione o perfil de proprietário para cadastrar imóveis.',
+      );
+    }
+    if (!hasListingPersonalData(ownerProfile.user)) {
+      throw new UnprocessableEntityException(
+        'Preencha telefone, data de nascimento, cidade e estado no seu perfil para cadastrar imóveis.',
       );
     }
 

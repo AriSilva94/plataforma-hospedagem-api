@@ -177,6 +177,104 @@ describe('Segurança de autenticação (e2e)', () => {
       });
   });
 
+  it('grava, normaliza e limpa os dados pessoais do próprio usuário', async () => {
+    const session = await account();
+    const cookie = `access_token=${session.accessToken}`;
+    const patchMe = (body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .patch('/users/me')
+        .set('Cookie', cookie)
+        .send(body);
+
+    for (const invalid of [
+      { phone: '12345' },
+      { phone: '(01) 91234-5678' },
+      { phone: '(11) 81234-5678' },
+      { birthDate: '10/05/1990' },
+      { birthDate: '1990-02-30' },
+      { birthDate: '1899-12-31' },
+      { birthDate: '2999-01-01' },
+      { birthDate: `${new Date().getUTCFullYear() - 17}-01-01` },
+      { city: 'A' },
+      { state: 'XX' },
+      { city: 'Recife', state: 'SP' },
+      { city: 'Recife' },
+    ]) {
+      await patchMe(invalid).expect(400);
+    }
+
+    await patchMe({
+      phone: '(11) 91234-5678',
+      birthDate: '1990-05-10',
+      city: '  São Paulo  ',
+      state: 'sp',
+    })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({
+          name: session.user.name,
+          phone: '+5511912345678',
+          birthDate: '1990-05-10',
+          city: 'São Paulo',
+          state: 'SP',
+        });
+      });
+
+    await patchMe({ phone: '+55 11 3123-4567' })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({
+          phone: '+551131234567',
+          birthDate: '1990-05-10',
+          city: 'São Paulo',
+          state: 'SP',
+        });
+      });
+
+    await patchMe({ state: 'RJ' }).expect(400);
+    await patchMe({ state: null }).expect(400);
+    await patchMe({ state: 'RJ', city: 'Niterói' }).expect(200);
+
+    await patchMe({ phone: '', birthDate: null, city: ' ', state: '' })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({
+          name: session.user.name,
+          phone: null,
+          birthDate: null,
+          city: null,
+          state: null,
+        });
+      });
+
+    await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Cookie', cookie)
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({ phone: null, birthDate: null });
+      });
+  });
+
+  it('lista as cidades de uma UF para usuários autenticados', async () => {
+    const session = await account();
+    const cities = (state: string) =>
+      request(app.getHttpServer())
+        .get(`/locations/states/${state}/cities`)
+        .set('Cookie', `access_token=${session.accessToken}`);
+
+    await request(app.getHttpServer())
+      .get('/locations/states/SP/cities')
+      .expect(401);
+    await cities('XX').expect(404);
+    await cities('sp')
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toHaveLength(645);
+        expect(body).toContain('São Paulo');
+      });
+  });
+
   it('cria um único perfil sob concorrência', async () => {
     const session = await account();
     await Promise.all(
