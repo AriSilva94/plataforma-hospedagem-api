@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { PublicUser, toPublicUser } from '../users/public-user';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -139,10 +140,7 @@ export class AuthService {
       await transaction.emailVerificationToken.deleteMany({
         where: { userId: resetToken.userId },
       });
-      await transaction.authSession.updateMany({
-        where: { userId: resetToken.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.revokeSessions(transaction, resetToken.userId);
     });
     await this.emailQueue.enqueuePasswordChanged(resetToken.userId);
   }
@@ -177,10 +175,7 @@ export class AuthService {
         data: { passwordHash },
       });
       await transaction.passwordResetToken.deleteMany({ where: { userId } });
-      await transaction.authSession.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.revokeSessions(transaction, userId);
       return this.tokenService.createSession(user, transaction);
     });
     await this.emailQueue.enqueuePasswordChanged(userId);
@@ -214,10 +209,7 @@ export class AuthService {
         where: { id: userId },
         data: { status: 'INACTIVE' },
       });
-      await transaction.authSession.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.revokeSessions(transaction, userId);
       await transaction.passwordResetToken.deleteMany({ where: { userId } });
       await transaction.emailVerificationToken.deleteMany({
         where: { userId },
@@ -231,5 +223,15 @@ export class AuthService {
 
   logout(refreshToken: string | undefined): Promise<void> {
     return this.tokenService.revokeSession(refreshToken);
+  }
+
+  private async revokeSessions(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<void> {
+    await transaction.authSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 }

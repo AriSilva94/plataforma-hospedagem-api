@@ -149,8 +149,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     await this.authService.logout(this.getCookie(request, 'refresh_token'));
-    response.clearCookie('access_token', this.cookieOptions());
-    response.clearCookie('refresh_token', this.cookieOptions());
+    this.clearSessionCookies(response);
   }
 
   @Post('forgot-password')
@@ -196,8 +195,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     await this.authService.deactivateAccount(request.user.id, dto);
-    response.clearCookie('access_token', this.cookieOptions());
-    response.clearCookie('refresh_token', this.cookieOptions());
+    this.clearSessionCookies(response);
   }
 
   private respondWithSession(result: AuthResult, response: Response) {
@@ -219,6 +217,11 @@ export class AuthController {
         maxAge: tokens.refreshTokenExpiresAt.getTime() - Date.now(),
       });
     }
+  }
+
+  private clearSessionCookies(response: Response): void {
+    response.clearCookie('access_token', this.cookieOptions());
+    response.clearCookie('refresh_token', this.cookieOptions());
   }
 
   private cookieOptions() {
