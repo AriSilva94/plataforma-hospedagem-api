@@ -153,11 +153,7 @@ enum GenderIdentity {
 
 enum PropertyType {
   HOUSE
-  APARTMENT
-  TOWNHOUSE
-  STUDIO
-  SHARED_HOUSE
-  OTHER
+  MOTEL
 }
 
 enum PropertyStatus {

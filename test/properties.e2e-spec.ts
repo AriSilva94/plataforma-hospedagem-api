@@ -136,6 +136,26 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(property).not.toHaveProperty('ownerProfileId');
   });
 
+  it('aceita motel como tipo do imóvel no cadastro e na edição', async () => {
+    const owner = await account();
+    const motel = await createProperty(owner, { type: 'MOTEL' });
+    expect(motel).toMatchObject({ type: 'MOTEL' });
+
+    await http()
+      .patch(`/owner/properties/${motel.id}`)
+      .set('Cookie', owner)
+      .send({ type: 'HOUSE' })
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toMatchObject({ type: 'HOUSE' });
+      });
+    await http()
+      .patch(`/owner/properties/${motel.id}`)
+      .set('Cookie', owner)
+      .send({ type: 'HOTEL' })
+      .expect(400);
+  });
+
   it('impede que um proprietário acesse ou altere recursos de outro', async () => {
     const ownerA = await account();
     const ownerB = await account();
@@ -449,6 +469,7 @@ describe('Imóveis e quartos (e2e)', () => {
       const property = await createProperty(owner, {
         ...completeAddress,
         complement: 'Apto 12',
+        type: 'MOTEL',
       });
       await upload(
         owner,
@@ -489,7 +510,11 @@ describe('Imóveis e quartos (e2e)', () => {
     ]) {
       expect(body).not.toHaveProperty(key);
     }
-    expect(body).toMatchObject({ city: 'São Paulo', state: 'SP' });
+    expect(body).toMatchObject({
+      city: 'São Paulo',
+      state: 'SP',
+      type: 'MOTEL',
+    });
     expect(body.rooms).toHaveLength(1);
     expect(body.rooms[0]).toMatchObject({
       acceptedAudiences: roomInput.acceptedAudiences,
