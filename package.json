@@ -22,7 +22,9 @@
     "test:e2e": "node --experimental-vm-modules --env-file=.env ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "test:load": "docker compose run --rm k6",
     "load:seed": "docker compose exec -T postgres psql -U hospedagem -d hospedagem -v properties=5000 -f - < test/load/seed-rooms.sql",
-    "load:cleanup": "docker compose exec -T postgres psql -U hospedagem -d hospedagem -f - < test/load/cleanup-rooms.sql"
+    "load:cleanup": "docker compose exec -T postgres psql -U hospedagem -d hospedagem -f - < test/load/cleanup-rooms.sql",
+    "seed": "node --env-file=.env -r ts-node/register -r tsconfig-paths/register prisma/seed.ts",
+    "seed:cleanup": "node --env-file=.env -r ts-node/register -r tsconfig-paths/register prisma/seed-cleanup.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1143.0",

@@ -1,6 +1,19 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+  UploadedFile,
+  UseGuards,
+} from '@nestjs/common';
 import { Role } from '../generated/prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { UploadedMediaFile } from '../media/media.service';
+import { UploadMedia } from '../media/upload-media.decorator';
 import { CurrentUser } from './current-user.decorator';
 import { UpdateGuestProfileDto } from './dto/update-guest-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -22,6 +35,21 @@ export class UsersController {
     @Body() dto: UpdateMeDto,
   ) {
     return this.usersService.updateMe(user.id, dto);
+  }
+
+  @Post('me/avatar')
+  @UploadMedia()
+  uploadAvatar(
+    @CurrentUser() user: AuthenticatedRequest['user'],
+    @UploadedFile() file: UploadedMediaFile | undefined,
+  ) {
+    return this.usersService.uploadAvatar(user.id, file);
+  }
+
+  @Delete('me/avatar')
+  @HttpCode(HttpStatus.OK)
+  removeAvatar(@CurrentUser() user: AuthenticatedRequest['user']) {
+    return this.usersService.removeAvatar(user.id);
   }
 
   @Post('me/profiles/guest')

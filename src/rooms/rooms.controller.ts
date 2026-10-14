@@ -38,6 +38,11 @@ export class RoomsController {
     return this.roomsService.create(user.id, propertyId, dto);
   }
 
+  @Get('rooms/summary')
+  summary(@CurrentUser() user: User) {
+    return this.roomsService.summary(user.id);
+  }
+
   @Get('rooms/:roomId')
   get(
     @CurrentUser() user: User,

@@ -53,6 +53,7 @@ describe('AuthService', () => {
       enqueuePasswordReset: jest.fn().mockResolvedValue(undefined),
       enqueuePasswordChanged: jest.fn().mockResolvedValue(undefined),
     };
+    const mediaService = { publicUrl: jest.fn().mockReturnValue(null) };
 
     return {
       service: new AuthService(
@@ -61,6 +62,7 @@ describe('AuthService', () => {
         tokens as never,
         email as never,
         queue as never,
+        mediaService as never,
       ),
       prisma,
       passwordService,

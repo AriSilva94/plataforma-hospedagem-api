@@ -507,6 +507,20 @@ describe('Imóveis e quartos (e2e)', () => {
     await http()
       .get(`/properties/${withoutAvailableRoom.property.id}`)
       .expect(404);
+
+    expect(body).toMatchObject({ host: { name: 'Proprietário de teste' } });
+    const hostId = (body.host as { id: string }).id;
+
+    const profile = await http().get(`/owners/${hostId}`).expect(200);
+    const profileBody = profile.body as Body & { rooms: Body[] };
+    expect(profileBody).toMatchObject({
+      id: hostId,
+      name: 'Proprietário de teste',
+    });
+    expect(profileBody.rooms).toHaveLength(1);
+    expect(profileBody.rooms[0]).toMatchObject({ id: listed.room.id });
+
+    await http().get(`/owners/${withoutAvailableRoom.property.id}`).expect(404);
   });
 
   it('permite ao hóspede informar o público no próprio perfil', async () => {

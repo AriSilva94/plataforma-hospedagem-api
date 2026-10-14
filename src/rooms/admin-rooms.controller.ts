@@ -13,6 +13,7 @@ import { AdminGuard } from '../auth/admin.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FeatureRoomDto } from './dto/feature-room.dto';
 import { ListAdminRoomsDto } from './dto/list-admin-rooms.dto';
+import { RejectRoomVerificationDto } from './dto/reject-room-verification.dto';
 import { RoomFeaturingService } from './room-featuring.service';
 
 @Controller('admin/rooms')
@@ -40,5 +41,28 @@ export class AdminRoomsController {
   @Delete(':roomId/featured')
   unfeature(@Param('roomId', ParseUUIDPipe) roomId: string) {
     return this.roomFeaturingService.unfeature(roomId);
+  }
+
+  @Put(':roomId/verified')
+  verify(@Param('roomId', ParseUUIDPipe) roomId: string) {
+    return this.roomFeaturingService.verify(roomId);
+  }
+
+  @Delete(':roomId/verified')
+  unverify(@Param('roomId', ParseUUIDPipe) roomId: string) {
+    return this.roomFeaturingService.unverify(roomId);
+  }
+
+  @Put(':roomId/rejected')
+  reject(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Body() dto: RejectRoomVerificationDto,
+  ) {
+    return this.roomFeaturingService.reject(roomId, dto.reason);
+  }
+
+  @Delete(':roomId/rejected')
+  unreject(@Param('roomId', ParseUUIDPipe) roomId: string) {
+    return this.roomFeaturingService.unreject(roomId);
   }
 }

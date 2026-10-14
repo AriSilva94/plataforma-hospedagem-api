@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { MediaService } from '../media/media.service';
 import { PublicUser, toPublicUser } from '../users/public-user';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { DeactivateAccountDto } from './dto/deactivate-account.dto';
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly tokenService: TokenService,
     private readonly emailService: EmailService,
     private readonly emailQueue: EmailQueue,
+    private readonly mediaService: MediaService,
   ) {}
 
   async register(dto: RegisterDto): Promise<void> {
@@ -58,7 +60,10 @@ export class AuthService {
     }
 
     const tokens = await this.tokenService.createSession(user);
-    return { ...tokens, user: toPublicUser(user) };
+    return {
+      ...tokens,
+      user: toPublicUser(user, this.mediaService.publicUrl(user.avatarKey)),
+    };
   }
 
   async requestPasswordReset(dto: ForgotPasswordDto): Promise<void> {

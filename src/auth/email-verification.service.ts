@@ -117,7 +117,7 @@ export class EmailVerificationService {
       });
       const tokens = await this.tokenService.createSession(user);
       await this.emailQueue.enqueueWelcome(user.id);
-      return { kind: 'registered', tokens, user: toPublicUser(user) };
+      return { kind: 'registered', tokens, user: toPublicUser(user, null) };
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw invalidLink();

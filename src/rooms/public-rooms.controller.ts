@@ -10,4 +10,9 @@ export class PublicRoomsController {
   list(@Query() query: ListPublicRoomsDto) {
     return this.publicRoomsService.list(query);
   }
+
+  @Get('featured')
+  listFeatured(@Query() query: ListPublicRoomsDto) {
+    return this.publicRoomsService.listFeatured(query);
+  }
 }

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MediaType, Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
 import { listedRoomWhere } from '../properties/public-listing';
@@ -9,44 +9,20 @@ import {
   withoutActiveFeaturingWhere,
 } from './room-featuring';
 import {
+  PublicRoomCardRow,
+  publicRoomCardSelect,
+  toPublicRoomCard,
+} from './public-room-card';
+import {
   RoomListingCursor,
   decodeRoomListingCursor,
   encodeRoomListingCursor,
 } from './room-listing-cursor';
 
-const coverMedia = {
-  where: { type: MediaType.IMAGE },
-  orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-  take: 1,
-  select: { type: true, storageKey: true },
-} satisfies Prisma.RoomMediaFindManyArgs & Prisma.PropertyMediaFindManyArgs;
-
-const roomCardSelect = {
-  id: true,
-  title: true,
-  priceCents: true,
-  rankingScore: true,
-  media: coverMedia,
-  property: {
-    select: {
-      id: true,
-      title: true,
-      type: true,
-      neighborhood: true,
-      city: true,
-      state: true,
-      media: coverMedia,
-    },
-  },
-} satisfies Prisma.RoomSelect;
-
 const rankingOrder: Prisma.RoomOrderByWithRelationInput[] = [
   { rankingScore: 'desc' },
   { id: 'asc' },
 ];
-
-type RoomCardRow = Prisma.RoomGetPayload<{ select: typeof roomCardSelect }>;
-type RankedRoom = RoomCardRow & { featured: boolean };
 
 @Injectable()
 export class PublicRoomsService {
@@ -57,7 +33,19 @@ export class PublicRoomsService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async list({ cursor: encodedCursor, limit }: ListPublicRoomsDto) {
+  list(dto: ListPublicRoomsDto) {
+    return this.paginate(dto, false, withoutActiveFeaturingWhere);
+  }
+
+  listFeatured(dto: ListPublicRoomsDto) {
+    return this.paginate(dto, true, activeFeaturingWhere);
+  }
+
+  private async paginate(
+    { cursor: encodedCursor, limit }: ListPublicRoomsDto,
+    featured: boolean,
+    featuringWhere: (now: Date) => Prisma.RoomWhereInput,
+  ) {
     const cursor = encodedCursor
       ? decodeRoomListingCursor(encodedCursor, new Date())
       : undefined;
@@ -66,8 +54,12 @@ export class PublicRoomsService {
 
     try {
       const [rooms, total] = await Promise.all([
-        this.ranked(cursor, limit + 1, asOf),
-        cursor ? undefined : this.prisma.room.count({ where: listedRoomWhere }),
+        this.segment(featuringWhere(asOf), cursor, limit + 1),
+        cursor
+          ? undefined
+          : this.prisma.room.count({
+              where: { AND: [listedRoomWhere, featuringWhere(asOf)] },
+            }),
       ]);
       const page = rooms.slice(0, limit);
       const last = page.at(-1);
@@ -75,59 +67,37 @@ export class PublicRoomsService {
         rooms.length > limit && last
           ? encodeRoomListingCursor({
               asOf,
-              featured: last.featured,
+              featured,
               rankingScore: last.rankingScore,
               id: last.id,
             })
           : null;
 
       this.logger.log(
-        `rooms.list durationMs=${elapsed(startedAt)} results=${page.length} featured=${page.filter((room) => room.featured).length} firstPage=${!cursor}`,
+        `rooms.list featured=${featured} durationMs=${elapsed(startedAt)} results=${page.length} firstPage=${!cursor}`,
       );
 
       return {
-        items: page.map((room) => this.toCard(room)),
+        items: page.map((room) =>
+          toPublicRoomCard(this.mediaService, room, featured),
+        ),
         nextCursor,
         ...(total === undefined ? {} : { total }),
       };
     } catch (error) {
       this.logger.error(
-        `rooms.list failed durationMs=${elapsed(startedAt)} firstPage=${!cursor}`,
+        `rooms.list failed featured=${featured} durationMs=${elapsed(startedAt)} firstPage=${!cursor}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
     }
   }
 
-  private async ranked(
-    cursor: RoomListingCursor | undefined,
-    take: number,
-    asOf: Date,
-  ): Promise<RankedRoom[]> {
-    const featured =
-      !cursor || cursor.featured
-        ? await this.segment(activeFeaturingWhere(asOf), cursor, take)
-        : [];
-    if (featured.length >= take) {
-      return featured.map((room) => ({ ...room, featured: true }));
-    }
-
-    const organic = await this.segment(
-      withoutActiveFeaturingWhere(asOf),
-      cursor?.featured ? undefined : cursor,
-      take - featured.length,
-    );
-    return [
-      ...featured.map((room) => ({ ...room, featured: true })),
-      ...organic.map((room) => ({ ...room, featured: false })),
-    ];
-  }
-
   private segment(
     featuringWhere: Prisma.RoomWhereInput,
     cursor: RoomListingCursor | undefined,
     take: number,
-  ): Promise<RoomCardRow[]> {
+  ): Promise<PublicRoomCardRow[]> {
     return this.prisma.room.findMany({
       where: {
         AND: [
@@ -138,22 +108,8 @@ export class PublicRoomsService {
       },
       orderBy: rankingOrder,
       take,
-      select: roomCardSelect,
+      select: publicRoomCardSelect,
     });
-  }
-
-  private toCard({ media, property, featured, ...room }: RankedRoom) {
-    const { media: propertyMedia, ...propertySummary } = property;
-    return {
-      id: room.id,
-      title: room.title,
-      priceCents: room.priceCents,
-      featured,
-      coverUrl:
-        this.mediaService.coverUrl(media) ??
-        this.mediaService.coverUrl(propertyMedia),
-      property: propertySummary,
-    };
   }
 }
 

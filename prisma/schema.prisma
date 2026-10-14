@@ -26,26 +26,27 @@ enum AuthProvider {
 }
 
 model User {
-  id                     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                   String
-  email                  String                 @unique
-  passwordHash           String?                @map("password_hash")
-  status                 UserStatus             @default(ACTIVE)
+  email                  String                  @unique
+  passwordHash           String?                 @map("password_hash")
+  status                 UserStatus              @default(ACTIVE)
   roles                  Role[]
   guestProfile           GuestProfile?
   ownerProfile           OwnerProfile?
   authSessions           AuthSession[]
   externalAuthIdentities ExternalAuthIdentity[]
-  emailVerifiedAt        DateTime?              @map("email_verified_at")
+  emailVerifiedAt        DateTime?               @map("email_verified_at")
   phone                  String?
-  birthDate              DateTime?              @map("birth_date") @db.Date
+  birthDate              DateTime?               @map("birth_date") @db.Date
   city                   String?
-  state                  String?                @db.Char(2)
+  state                  String?                 @db.Char(2)
   passwordResetTokens    PasswordResetToken[]
   emailVerificationToken EmailVerificationToken?
   favorites              Favorite[]
-  createdAt              DateTime               @default(now()) @map("created_at")
-  updatedAt              DateTime               @updatedAt @map("updated_at")
+  avatarKey              String?                 @map("avatar_key")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -181,6 +182,12 @@ enum RoomStatus {
   INACTIVE
 }
 
+enum RoomVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 enum BathroomType {
   PRIVATE
   SHARED
@@ -250,28 +257,30 @@ model PropertyMedia {
 }
 
 model Room {
-  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  propertyId        String           @map("property_id") @db.Uuid
-  property          Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  status            RoomStatus       @default(AVAILABLE)
-  title             String
-  description       String?
-  priceCents        Int              @map("price_cents")
-  capacity          Int
-  bathroomType      BathroomType     @map("bathroom_type")
-  acceptedAudiences GenderIdentity[] @map("accepted_audiences")
-  amenities         String[]         @default([])
-  additionalInfo    String?          @map("additional_info")
-  completenessScore Int              @default(0) @map("completeness_score")
-  rankingScore      Int              @default(0) @map("ranking_score")
-  rankingVersion    Int              @default(0) @map("ranking_version")
-  rankingUpdatedAt  DateTime?        @map("ranking_updated_at")
-  featuredFrom      DateTime?        @map("featured_from")
-  featuredUntil     DateTime?        @map("featured_until")
-  media             RoomMedia[]
-  favorites         Favorite[]
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  id                         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  propertyId                 String                 @map("property_id") @db.Uuid
+  property                   Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  status                     RoomStatus             @default(AVAILABLE)
+  title                      String
+  description                String?
+  priceCents                 Int                    @map("price_cents")
+  capacity                   Int
+  bathroomType               BathroomType           @map("bathroom_type")
+  acceptedAudiences          GenderIdentity[]       @map("accepted_audiences")
+  amenities                  String[]               @default([])
+  additionalInfo             String?                @map("additional_info")
+  completenessScore          Int                    @default(0) @map("completeness_score")
+  rankingScore               Int                    @default(0) @map("ranking_score")
+  rankingVersion             Int                    @default(0) @map("ranking_version")
+  rankingUpdatedAt           DateTime?              @map("ranking_updated_at")
+  featuredFrom               DateTime?              @map("featured_from")
+  featuredUntil              DateTime?              @map("featured_until")
+  verificationStatus         RoomVerificationStatus @default(PENDING) @map("verification_status")
+  verificationRejectedReason String?                @map("verification_rejected_reason")
+  media                      RoomMedia[]
+  favorites                  Favorite[]
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
 
   @@index([propertyId])
   @@index([status, rankingScore(sort: Desc), id])

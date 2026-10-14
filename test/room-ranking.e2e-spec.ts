@@ -14,7 +14,7 @@ import {
 } from './support/e2e';
 
 type Body = Record<string, unknown>;
-type ListedRoom = { id: string; featured: boolean };
+type ListedRoom = { id: string; featured: boolean; verified: boolean };
 type RoomPage = { items: ListedRoom[]; nextCursor: string | null };
 
 const day = 24 * 60 * 60 * 1000;
@@ -48,13 +48,16 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     });
   }
 
-  async function listAll(limit: number): Promise<ListedRoom[]> {
+  async function listAll(
+    limit: number,
+    path = '/rooms',
+  ): Promise<ListedRoom[]> {
     const items: ListedRoom[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 1000; page++) {
       const query: string = cursor
-        ? `/rooms?limit=${limit}&cursor=${cursor}`
-        : `/rooms?limit=${limit}`;
+        ? `${path}?limit=${limit}&cursor=${cursor}`
+        : `${path}?limit=${limit}`;
       const response = await http().get(query).expect(200);
       const body = response.body as RoomPage;
       items.push(...body.items);
@@ -189,7 +192,7 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     });
   });
 
-  it('ordena por destaque ativo, depois rankingScore, sem incluir quartos inelegíveis', async () => {
+  it('GET /rooms (orgânico) ordena por rankingScore e nunca inclui destaque ativo', async () => {
     const owner = await account();
     const adminCookie = await admin();
     const low = await publishedRoom(owner.cookie);
@@ -243,30 +246,30 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       .send({ status: 'UNAVAILABLE' })
       .expect(200);
 
-    const items = await listAll(48);
-    const [featuredAt, highAt, lowAt, expiredAt] = positionsOf(items, [
-      featured.roomId,
+    const organic = await listAll(48);
+    expect(organic.every((item) => !item.featured)).toBe(true);
+    const [highAt, lowAt, expiredAt] = positionsOf(organic, [
       high.roomId,
       low.roomId,
       expired.roomId,
     ]);
-
-    expect(featuredAt).toBeGreaterThanOrEqual(0);
-    expect(featuredAt).toBeLessThan(highAt);
+    expect(highAt).toBeGreaterThanOrEqual(0);
     expect(highAt).toBeLessThan(lowAt);
     expect(lowAt).toBeLessThan(expiredAt);
-    expect(items[featuredAt].featured).toBe(true);
-    expect(items[expiredAt].featured).toBe(false);
-    expect(items[highAt].featured).toBe(false);
-    expect(items.findIndex((item) => !item.featured)).toBeGreaterThan(
-      items.map((item) => item.featured).lastIndexOf(true),
-    );
+    expect(positionsOf(organic, [featured.roomId])).toEqual([-1]);
+
+    const featuredList = await listAll(48, '/rooms/featured');
+    expect(featuredList.every((item) => item.featured)).toBe(true);
     expect(
-      positionsOf(items, [
+      positionsOf(featuredList, [featured.roomId])[0],
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      positionsOf(featuredList, [
+        expired.roomId,
         pausedFeatured.roomId,
         unavailablePropertyFeatured.roomId,
       ]),
-    ).toEqual([-1, -1]);
+    ).toEqual([-1, -1, -1]);
   });
 
   it('não lista quartos de proprietário inativo, mesmo destacados', async () => {
@@ -275,7 +278,7 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     const room = await publishedRoom(owner.cookie);
     await feature(adminCookie, room.roomId, -day, day).expect(200);
     expect(
-      positionsOf(await listAll(48), [room.roomId])[0],
+      positionsOf(await listAll(48, '/rooms/featured'), [room.roomId])[0],
     ).toBeGreaterThanOrEqual(0);
 
     await prisma.user.update({
@@ -283,7 +286,9 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       data: { status: 'INACTIVE' },
     });
 
-    expect(positionsOf(await listAll(48), [room.roomId])).toEqual([-1]);
+    expect(
+      positionsOf(await listAll(48, '/rooms/featured'), [room.roomId]),
+    ).toEqual([-1]);
     await http().get(`/properties/${room.propertyId}`).expect(404);
   });
 
@@ -298,8 +303,8 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     let expired = false;
     for (let page = 0; page < 1000; page++) {
       const query: string = cursor
-        ? `/rooms?limit=1&cursor=${cursor}`
-        : '/rooms?limit=1';
+        ? `/rooms/featured?limit=1&cursor=${cursor}`
+        : '/rooms/featured?limit=1';
       const body = (await http().get(query).expect(200)).body as RoomPage;
       seen.push(...body.items);
       if (!expired && body.items.some((item) => item.id === expiring.roomId)) {
@@ -371,7 +376,15 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     ) as unknown as Body;
 
     expect(Object.keys(item).sort()).toEqual(
-      ['coverUrl', 'featured', 'id', 'priceCents', 'property', 'title'].sort(),
+      [
+        'coverUrl',
+        'featured',
+        'id',
+        'priceCents',
+        'property',
+        'title',
+        'verified',
+      ].sort(),
     );
     expect(item.property).toEqual({
       id: propertyId,
@@ -539,6 +552,93 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       `Suíte ${token} C`,
       `Suíte ${token} D`,
     ]);
+  });
+
+  it('permite que ADMIN verifique e remova a verificação de um quarto, exposta na listagem pública', async () => {
+    const owner = await account();
+    const adminCookie = await admin();
+    const { roomId } = await publishedRoom(owner.cookie);
+
+    await http().put(`/admin/rooms/${roomId}/verified`).expect(401);
+    await http()
+      .put(`/admin/rooms/${roomId}/verified`)
+      .set('Cookie', owner.cookie)
+      .expect(403);
+
+    const verified = await http()
+      .put(`/admin/rooms/${roomId}/verified`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(verified.body).toMatchObject({
+      id: roomId,
+      verificationStatus: 'VERIFIED',
+    });
+
+    const publicItems = await listAll(48);
+    expect(publicItems.find((item) => item.id === roomId)).toMatchObject({
+      verified: true,
+    });
+
+    await http()
+      .delete(`/admin/rooms/${roomId}/verified`)
+      .set('Cookie', owner.cookie)
+      .expect(403);
+    const unverified = await http()
+      .delete(`/admin/rooms/${roomId}/verified`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(unverified.body).toMatchObject({
+      id: roomId,
+      verificationStatus: 'PENDING',
+    });
+
+    const refreshed = await listAll(48);
+    expect(refreshed.find((item) => item.id === roomId)).toMatchObject({
+      verified: false,
+    });
+
+    await http()
+      .put(`/admin/rooms/${randomUUID()}/verified`)
+      .set('Cookie', adminCookie)
+      .expect(404);
+  });
+
+  it('permite que ADMIN rejeite e volte a análise a verificação de um quarto', async () => {
+    const owner = await account();
+    const adminCookie = await admin();
+    const { roomId } = await publishedRoom(owner.cookie);
+
+    await http()
+      .put(`/admin/rooms/${roomId}/rejected`)
+      .set('Cookie', owner.cookie)
+      .send({ reason: 'Fotos não condizem com o anúncio.' })
+      .expect(403);
+
+    const rejected = await http()
+      .put(`/admin/rooms/${roomId}/rejected`)
+      .set('Cookie', adminCookie)
+      .send({ reason: 'Fotos não condizem com o anúncio.' })
+      .expect(200);
+    expect(rejected.body).toMatchObject({
+      id: roomId,
+      verificationStatus: 'REJECTED',
+      verificationRejectedReason: 'Fotos não condizem com o anúncio.',
+    });
+
+    const publicItems = await listAll(48);
+    expect(publicItems.find((item) => item.id === roomId)).toMatchObject({
+      verified: false,
+    });
+
+    const unrejected = await http()
+      .delete(`/admin/rooms/${roomId}/rejected`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(unrejected.body).toMatchObject({
+      id: roomId,
+      verificationStatus: 'PENDING',
+      verificationRejectedReason: null,
+    });
   });
 
   afterAll(async () => {

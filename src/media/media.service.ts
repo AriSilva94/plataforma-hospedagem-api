@@ -106,6 +106,10 @@ export class MediaService {
     return cover ? this.storage.publicUrl(cover.storageKey) : null;
   }
 
+  publicUrl(storageKey: string | null): string | null {
+    return storageKey ? this.storage.publicUrl(storageKey) : null;
+  }
+
   assertCompleteOrder(currentIds: string[], requestedIds: string[]): void {
     const current = new Set(currentIds);
     if (
