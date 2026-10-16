@@ -457,6 +457,8 @@ export class PropertiesService {
           },
         }).missing,
         coverUrl: this.mediaService.coverUrl(roomMedia),
+        verificationStatus: room.verificationStatus,
+        verificationRejectedReason: room.verificationRejectedReason,
       })),
     };
   }

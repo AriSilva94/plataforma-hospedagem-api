@@ -4,12 +4,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Role, User } from '../generated/prisma/client';
+import { MediaType, Role, User } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import {
   isRecordNotFoundError,
   isUniqueConstraintError,
 } from '../infrastructure/prisma/prisma-error';
+import { MediaService, UploadedMediaFile } from '../media/media.service';
 import { isCityOfState } from '../locations/brazilian-cities';
 import {
   ListingPersonalDataField,
@@ -31,7 +32,10 @@ const LISTING_PERSONAL_DATA_FIELDS: ListingPersonalDataField[] = [
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mediaService: MediaService,
+  ) {}
 
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -98,6 +102,37 @@ export class UsersService {
       }
     }
 
+    return this.getMe(userId);
+  }
+
+  async uploadAvatar(userId: string, file: UploadedMediaFile | undefined) {
+    const { storageKey } = await this.mediaService.store(
+      file,
+      `users/${userId}`,
+      [MediaType.IMAGE],
+    );
+    return this.replaceAvatar(userId, storageKey);
+  }
+
+  removeAvatar(userId: string) {
+    return this.replaceAvatar(userId, null);
+  }
+
+  private async replaceAvatar(userId: string, avatarKey: string | null) {
+    const previous = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarKey: true },
+    });
+    if (!previous) {
+      throw new NotFoundException('Usuário não encontrado.');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarKey },
+    });
+    if (previous.avatarKey) {
+      await this.mediaService.removeQuietly([previous.avatarKey]);
+    }
     return this.getMe(userId);
   }
 
@@ -186,7 +221,7 @@ export class UsersService {
     user: User & { guestProfile?: unknown; ownerProfile?: unknown },
   ) {
     return {
-      ...toPublicUser(user),
+      ...toPublicUser(user, this.mediaService.publicUrl(user.avatarKey)),
       guestProfile: user.guestProfile,
       ownerProfile: user.ownerProfile,
     };

@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoomStatus } from '../generated/prisma/client';
+import {
+  Prisma,
+  RoomStatus,
+  RoomVerificationStatus,
+} from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
 import { visiblePropertyWhere } from './public-listing';
@@ -26,6 +30,7 @@ const publicDetailSelect = {
     select: { type: true, label: true, description: true },
   },
   media: { orderBy: mediaOrder },
+  ownerProfile: { select: { id: true, user: { select: { name: true } } } },
   rooms: {
     where: { status: RoomStatus.AVAILABLE },
     orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
@@ -39,6 +44,7 @@ const publicDetailSelect = {
       acceptedAudiences: true,
       amenities: true,
       additionalInfo: true,
+      verificationStatus: true,
       media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
     },
   },
@@ -60,11 +66,15 @@ export class PublicPropertiesService {
       throw new NotFoundException('Imóvel não encontrado.');
     }
 
+    const { ownerProfile, ...rest } = property;
+
     return {
-      ...property,
+      ...rest,
+      host: { id: ownerProfile.id, name: ownerProfile.user.name },
       media: property.media.map((item) => this.mediaService.toResponse(item)),
-      rooms: property.rooms.map((room) => ({
+      rooms: property.rooms.map(({ verificationStatus, ...room }) => ({
         ...room,
+        verified: verificationStatus === RoomVerificationStatus.VERIFIED,
         media: room.media.map((item) => this.mediaService.toResponse(item)),
       })),
     };

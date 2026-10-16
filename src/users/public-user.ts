@@ -13,9 +13,13 @@ export type PublicUser = Pick<
   | 'roles'
   | 'createdAt'
   | 'updatedAt'
-> & { birthDate: string | null; hasPassword: boolean };
+> & {
+  birthDate: string | null;
+  hasPassword: boolean;
+  avatarUrl: string | null;
+};
 
-export function toPublicUser(user: User): PublicUser {
+export function toPublicUser(user: User, avatarUrl: string | null): PublicUser {
   return {
     id: user.id,
     name: user.name,
@@ -28,6 +32,7 @@ export function toPublicUser(user: User): PublicUser {
     status: user.status,
     hasPassword: user.passwordHash !== null,
     roles: user.roles,
+    avatarUrl,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

@@ -3,7 +3,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { Prisma, RoomVerificationStatus } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { listedRoomWhere } from '../properties/public-listing';
 import { AdminRoomSort, ListAdminRoomsDto } from './dto/list-admin-rooms.dto';
@@ -16,6 +16,8 @@ const adminRoomSelect = {
   completenessScore: true,
   featuredFrom: true,
   featuredUntil: true,
+  verificationStatus: true,
+  verificationRejectedReason: true,
   property: {
     select: { id: true, title: true, status: true, city: true, state: true },
   },
@@ -37,7 +39,15 @@ type AdminRoomRow = Prisma.RoomGetPayload<{
 export class RoomFeaturingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list({ q, featuring, listed, sort, page, limit }: ListAdminRoomsDto) {
+  async list({
+    q,
+    featuring,
+    listed,
+    verificationStatus,
+    sort,
+    page,
+    limit,
+  }: ListAdminRoomsDto) {
     const now = new Date();
     const where: Prisma.RoomWhereInput = {
       AND: [
@@ -56,6 +66,7 @@ export class RoomFeaturingService {
           : listed
             ? listedRoomWhere
             : { NOT: listedRoomWhere },
+        verificationStatus === undefined ? {} : { verificationStatus },
       ],
     };
     const [rooms, total] = await Promise.all([
@@ -110,6 +121,47 @@ export class RoomFeaturingService {
         data: { featuredFrom: null, featuredUntil: null },
       });
     });
+    return this.get(roomId);
+  }
+
+  verify(roomId: string) {
+    return this.setVerification(roomId, RoomVerificationStatus.VERIFIED);
+  }
+
+  unverify(roomId: string) {
+    return this.setVerification(roomId, RoomVerificationStatus.PENDING);
+  }
+
+  reject(roomId: string, reason: string) {
+    return this.setVerification(
+      roomId,
+      RoomVerificationStatus.REJECTED,
+      reason,
+    );
+  }
+
+  unreject(roomId: string) {
+    return this.setVerification(
+      roomId,
+      RoomVerificationStatus.PENDING,
+      null,
+      RoomVerificationStatus.REJECTED,
+    );
+  }
+
+  private async setVerification(
+    roomId: string,
+    verificationStatus: RoomVerificationStatus,
+    verificationRejectedReason: string | null = null,
+    currentStatus?: RoomVerificationStatus,
+  ) {
+    const { count } = await this.prisma.room.updateMany({
+      where: { id: roomId, verificationStatus: currentStatus },
+      data: { verificationStatus, verificationRejectedReason },
+    });
+    if (count === 0) {
+      throw roomNotFound();
+    }
     return this.get(roomId);
   }
 

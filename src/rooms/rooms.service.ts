@@ -3,7 +3,12 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { MediaType, Prisma, RoomStatus } from '../generated/prisma/client';
+import {
+  MediaType,
+  Prisma,
+  RoomStatus,
+  RoomVerificationStatus,
+} from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import {
@@ -54,6 +59,37 @@ export class RoomsService {
     private readonly mediaService: MediaService,
     private readonly roomRanking: RoomRankingService,
   ) {}
+
+  async summary(userId: string) {
+    const ownedRoomsWhere: Prisma.RoomWhereInput = {
+      property: { ownerProfile: { userId } },
+    };
+    const [total, available, pending, rejected] = await Promise.all([
+      this.prisma.room.count({ where: ownedRoomsWhere }),
+      this.prisma.room.count({
+        where: { ...ownedRoomsWhere, status: RoomStatus.AVAILABLE },
+      }),
+      this.prisma.room.count({
+        where: {
+          ...ownedRoomsWhere,
+          verificationStatus: RoomVerificationStatus.PENDING,
+        },
+      }),
+      this.prisma.room.count({
+        where: {
+          ...ownedRoomsWhere,
+          verificationStatus: RoomVerificationStatus.REJECTED,
+        },
+      }),
+    ]);
+
+    return {
+      totalRooms: total,
+      availableRooms: available,
+      pendingVerificationRooms: pending,
+      rejectedVerificationRooms: rejected,
+    };
+  }
 
   async create(userId: string, propertyId: string, dto: CreateRoomDto) {
     const room = await this.prisma.$transaction(async (transaction) => {

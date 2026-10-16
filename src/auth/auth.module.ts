@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MediaModule } from '../media/media.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailQueue } from './email-queue';
@@ -11,6 +12,7 @@ import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
 @Module({
+  imports: [MediaModule],
   controllers: [AuthController],
   providers: [
     AuthService,

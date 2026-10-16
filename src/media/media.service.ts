@@ -103,7 +103,11 @@ export class MediaService {
 
   coverUrl(media: Pick<MediaRecord, 'type' | 'storageKey'>[]): string | null {
     const cover = media.find((item) => item.type === MediaType.IMAGE);
-    return cover ? this.storage.publicUrl(cover.storageKey) : null;
+    return this.publicUrl(cover?.storageKey ?? null);
+  }
+
+  publicUrl(storageKey: string | null): string | null {
+    return storageKey ? this.storage.publicUrl(storageKey) : null;
   }
 
   assertCompleteOrder(currentIds: string[], requestedIds: string[]): void {
