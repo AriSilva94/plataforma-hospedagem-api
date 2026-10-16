@@ -1,10 +1,8 @@
 import * as crypto from 'node:crypto';
 import * as argon2 from 'argon2';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   Prisma,
-  PrismaClient,
   type BathroomType,
   type GenderIdentity,
   type MediaType,
@@ -15,25 +13,8 @@ import { evaluateCompleteness } from '../src/ranking/room-completeness';
 import { rankingScoreFor, RANKING_VERSION } from '../src/ranking/room-ranking';
 import { ROOM_AMENITIES } from '../src/rooms/room-catalog';
 import { PROPERTY_FEATURES } from '../src/properties/property-catalog';
+import { prisma, R2_BUCKET, s3, SEED_EMAIL_DOMAIN } from './seed-clients';
 
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({
-    connectionString: process.env.DATABASE_URL as string,
-  }),
-});
-
-const s3 = new S3Client({
-  region: 'auto',
-  endpoint: process.env.R2_ENDPOINT,
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-  },
-});
-const R2_BUCKET = process.env.R2_BUCKET as string;
-
-const SEED_EMAIL_DOMAIN = '@seed.local';
 const TOTAL_ROOMS_TARGET = 1500;
 const FEATURED_RATIO = 0.2;
 const ROOM_IMAGE_QUERIES = [

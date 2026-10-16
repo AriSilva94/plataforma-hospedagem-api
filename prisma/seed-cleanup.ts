@@ -1,29 +1,5 @@
-import {
-  DeleteObjectsCommand,
-  ListObjectsV2Command,
-  S3Client,
-} from '@aws-sdk/client-s3';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../src/generated/prisma/client';
-
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({
-    connectionString: process.env.DATABASE_URL as string,
-  }),
-});
-
-const s3 = new S3Client({
-  region: 'auto',
-  endpoint: process.env.R2_ENDPOINT,
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-  },
-});
-const R2_BUCKET = process.env.R2_BUCKET as string;
-
-const SEED_EMAIL_DOMAIN = '@seed.local';
+import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { prisma, R2_BUCKET, s3, SEED_EMAIL_DOMAIN } from './seed-clients';
 
 async function deleteSeedMedia(): Promise<number> {
   let deleted = 0;

@@ -5,7 +5,13 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 
-const mediaServiceStub = { publicUrl: jest.fn().mockReturnValue(null) };
+const createService = (prisma: unknown) =>
+  new UsersService(
+    prisma as never,
+    {
+      publicUrl: jest.fn().mockReturnValue(null),
+    } as never,
+  );
 
 describe('UsersService', () => {
   it('atualiza apenas os dados do usuário autenticado', async () => {
@@ -18,10 +24,7 @@ describe('UsersService', () => {
         }),
       },
     };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
 
     await expect(
       service.updateMe('user-a', { name: 'Novo nome' }),
@@ -43,10 +46,7 @@ describe('UsersService', () => {
         }),
       },
     };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
 
     await service.updateMe('user-a', {
       phone: '+5511912345678',
@@ -83,10 +83,7 @@ describe('UsersService', () => {
         }),
       },
     };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
 
     await expect(
       service.updateMe('user-a', { city: null }),
@@ -96,10 +93,7 @@ describe('UsersService', () => {
 
   it('aceita quem completa 18 anos hoje e recusa quem ainda não completou', async () => {
     const prisma = { user: { update: jest.fn().mockResolvedValue({}) } };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
     const eighteenthBirthday = (daysFromToday: number) => {
       const now = new Date();
       return new Date(
@@ -125,10 +119,7 @@ describe('UsersService', () => {
     'recusa a data de nascimento %s',
     async (birthDate) => {
       const prisma = { user: { update: jest.fn() } };
-      const service = new UsersService(
-        prisma as never,
-        mediaServiceStub as never,
-      );
+      const service = createService(prisma);
 
       await expect(
         service.updateMe('user-a', { birthDate }),
@@ -153,10 +144,7 @@ describe('UsersService', () => {
         callback(transaction),
       ),
     };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
 
     await expect(service.addProfile('user-a', 'OWNER')).resolves.toMatchObject({
       roles: ['GUEST', 'OWNER'],
@@ -171,10 +159,7 @@ describe('UsersService', () => {
 
   it('retorna erro quando o usuário autenticado não existe', async () => {
     const prisma = { user: { findUnique: jest.fn().mockResolvedValue(null) } };
-    const service = new UsersService(
-      prisma as never,
-      mediaServiceStub as never,
-    );
+    const service = createService(prisma);
 
     await expect(service.getMe('missing-user')).rejects.toBeInstanceOf(
       NotFoundException,
