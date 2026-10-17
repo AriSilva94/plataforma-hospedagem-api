@@ -39,29 +39,14 @@ export class MediaService {
     keyPrefix: string,
     allowedTypes: readonly MediaType[],
   ): Promise<StoredMedia> {
-    if (!file) {
-      throw new BadRequestException('Envie um arquivo no campo "file".');
-    }
-
-    const format = detectMediaFormat(await readHeader(file.path));
-    if (!format || !allowedTypes.includes(format.type)) {
-      throw new BadRequestException(
-        allowedTypes.includes(MediaType.VIDEO)
-          ? 'Formato não suportado. Envie imagens JPEG, PNG ou WebP, ou vídeos MP4, MOV ou WebM.'
-          : 'Formato não suportado. Envie imagens JPEG, PNG ou WebP.',
-      );
-    }
-    if (file.size <= 0 || file.size > maxBytesFor(format.type)) {
-      throw new PayloadTooLargeException(
-        `O arquivo excede o limite de ${maxBytesFor(format.type) / (1024 * 1024)} MB.`,
-      );
-    }
+    const inspected = await inspectFile(file, allowedTypes);
+    const { format } = inspected;
 
     const sanitizedImage =
       format.type === MediaType.IMAGE
-        ? await sanitizeImage(file.path, format.extension)
+        ? await sanitizeImage(inspected.file.path, format.extension)
         : undefined;
-    const storedSize = sanitizedImage?.length ?? file.size;
+    const storedSize = sanitizedImage?.length ?? inspected.file.size;
     if (storedSize > maxBytesFor(format.type)) {
       throw new PayloadTooLargeException(
         `O arquivo excede o limite de ${maxBytesFor(format.type) / (1024 * 1024)} MB.`,
@@ -74,7 +59,7 @@ export class MediaService {
       key: storageKey,
       body: sanitizedImage
         ? Readable.from([sanitizedImage])
-        : createReadStream(file.path),
+        : createReadStream(inspected.file.path),
       contentType: format.mimeType,
       sizeBytes: storedSize,
     });
@@ -85,6 +70,13 @@ export class MediaService {
       mimeType: format.mimeType,
       sizeBytes: storedSize,
     };
+  }
+
+  async typeOf(
+    file: UploadedMediaFile | undefined,
+    allowedTypes: readonly MediaType[],
+  ): Promise<MediaType> {
+    return (await inspectFile(file, allowedTypes)).format.type;
   }
 
   async removeQuietly(keys: string[]): Promise<void> {
@@ -136,6 +128,30 @@ export class MediaService {
       );
     }
   }
+}
+
+async function inspectFile(
+  file: UploadedMediaFile | undefined,
+  allowedTypes: readonly MediaType[],
+) {
+  if (!file) {
+    throw new BadRequestException('Envie um arquivo no campo "file".');
+  }
+
+  const format = detectMediaFormat(await readHeader(file.path));
+  if (!format || !allowedTypes.includes(format.type)) {
+    throw new BadRequestException(
+      allowedTypes.includes(MediaType.VIDEO)
+        ? 'Formato não suportado. Envie imagens JPEG, PNG ou WebP, ou vídeos MP4, MOV ou WebM.'
+        : 'Formato não suportado. Envie imagens JPEG, PNG ou WebP.',
+    );
+  }
+  if (file.size <= 0 || file.size > maxBytesFor(format.type)) {
+    throw new PayloadTooLargeException(
+      `O arquivo excede o limite de ${maxBytesFor(format.type) / (1024 * 1024)} MB.`,
+    );
+  }
+  return { file, format };
 }
 
 async function sanitizeImage(path: string, expectedExtension: string) {

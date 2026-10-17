@@ -5,30 +5,32 @@ const frontendUrl = 'https://app.domusx.test';
 
 function execute(method: string, headers: Record<string, string> = {}) {
   const request = { method, headers } as unknown as Request;
+  const status = jest.fn().mockReturnThis();
+  const json = jest.fn().mockReturnThis();
   const response = {
-    status: jest.fn().mockReturnThis(),
-    json: jest.fn().mockReturnThis(),
+    status,
+    json,
   } as unknown as Response;
   const next = jest.fn() as NextFunction;
   csrfProtection(frontendUrl)(request, response, next);
-  return { response, next };
+  return { status, next };
 }
 
 describe('csrfProtection', () => {
   it('recusa mutação originada por outro subdomínio', () => {
-    const { response, next } = execute('POST', {
+    const { status, next } = execute('POST', {
       origin: 'https://untrusted.domusx.test',
       'x-csrf-protection': '1',
     });
 
-    expect(response.status).toHaveBeenCalledWith(403);
+    expect(status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 
   it('exige o cabeçalho explícito nas mutações do frontend', () => {
-    const { response, next } = execute('PATCH', { origin: frontendUrl });
+    const { status, next } = execute('PATCH', { origin: frontendUrl });
 
-    expect(response.status).toHaveBeenCalledWith(403);
+    expect(status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -42,11 +44,11 @@ describe('csrfProtection', () => {
   });
 
   it('recusa navegador cross-site mesmo sem Origin', () => {
-    const { response, next } = execute('POST', {
+    const { status, next } = execute('POST', {
       'sec-fetch-site': 'cross-site',
     });
 
-    expect(response.status).toHaveBeenCalledWith(403);
+    expect(status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 

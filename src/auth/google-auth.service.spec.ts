@@ -279,9 +279,7 @@ describe('GoogleAuthService', () => {
       email: 'ana@empresa.com',
       passwordHash: 'hash-definido-por-terceiro',
     });
-    mockGoogle(
-      makeIdToken({ email: 'ana@empresa.com', hd: 'empresa.com' }),
-    );
+    mockGoogle(makeIdToken({ email: 'ana@empresa.com', hd: 'empresa.com' }));
 
     await service.authenticateCallback('code', nonce);
 
@@ -337,7 +335,10 @@ describe('GoogleAuthService', () => {
 
   it('relê a identidade persistida após conflito único concorrente', async () => {
     const { service, prisma } = createService();
-    prisma.user.findUnique.mockResolvedValue({ ...user, email: 'ana@gmail.com' });
+    prisma.user.findUnique.mockResolvedValue({
+      ...user,
+      email: 'ana@gmail.com',
+    });
     prisma.externalAuthIdentity.create.mockRejectedValue({ code: 'P2002' });
     prisma.externalAuthIdentity.findUnique
       .mockResolvedValueOnce(null)
@@ -354,7 +355,10 @@ describe('GoogleAuthService', () => {
   it('não silencia erro único sem identidade persistida', async () => {
     const { service, prisma } = createService();
     const error = { code: 'P2002' };
-    prisma.user.findUnique.mockResolvedValue({ ...user, email: 'ana@gmail.com' });
+    prisma.user.findUnique.mockResolvedValue({
+      ...user,
+      email: 'ana@gmail.com',
+    });
     prisma.externalAuthIdentity.create.mockRejectedValue(error);
     mockGoogle(makeIdToken({ email: 'ana@gmail.com' }));
 

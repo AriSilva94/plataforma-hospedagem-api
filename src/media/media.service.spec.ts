@@ -7,7 +7,7 @@ import { Readable } from 'stream';
 import { MediaType } from '../generated/prisma/client';
 import { MAX_IMAGE_BYTES } from './media-file';
 import { MediaService } from './media.service';
-import { MediaStorage } from './media-storage';
+import { MediaObject, MediaStorage } from './media-storage';
 
 const mp4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
@@ -23,7 +23,7 @@ const quicktime = Buffer.concat([
 describe('MediaService', () => {
   let directory: string;
   let png: Buffer;
-  let put: jest.Mock;
+  let put: jest.Mock<Promise<void>, [MediaObject]>;
   let service: MediaService;
 
   beforeEach(async () => {
@@ -38,7 +38,7 @@ describe('MediaService', () => {
     })
       .png()
       .toBuffer();
-    put = jest.fn().mockResolvedValue(undefined);
+    put = jest.fn<Promise<void>, [MediaObject]>().mockResolvedValue(undefined);
     const storage: MediaStorage = {
       put,
       delete: jest.fn().mockResolvedValue(undefined),
@@ -125,7 +125,7 @@ describe('MediaService', () => {
 
     const uploaded = put.mock.calls[0][0] as { body: Readable };
     const chunks: Buffer[] = [];
-    for await (const chunk of uploaded.body) {
+    for await (const chunk of uploaded.body as AsyncIterable<Buffer | string>) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const metadata = await sharp(Buffer.concat(chunks)).metadata();

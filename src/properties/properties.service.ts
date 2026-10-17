@@ -249,6 +249,22 @@ export class PropertiesService {
     file: UploadedMediaFile | undefined,
   ) {
     await this.findOwned(userId, propertyId);
+    const mediaType = await this.mediaService.typeOf(file, [
+      MediaType.IMAGE,
+      MediaType.VIDEO,
+    ]);
+    const currentCount = await this.prisma.propertyMedia.count({
+      where: { propertyId, type: mediaType },
+    });
+    const currentLimit =
+      mediaType === MediaType.IMAGE ? MAX_PROPERTY_IMAGES : MAX_PROPERTY_VIDEOS;
+    if (currentCount >= currentLimit) {
+      throw new UnprocessableEntityException(
+        mediaType === MediaType.IMAGE
+          ? `O imóvel pode ter no máximo ${currentLimit} fotos.`
+          : `O imóvel pode ter no máximo ${currentLimit} vídeos.`,
+      );
+    }
     const stored = await this.mediaService.store(
       file,
       `properties/${propertyId}`,

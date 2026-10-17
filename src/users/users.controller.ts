@@ -10,10 +10,11 @@ import {
   UploadedFile,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '../generated/prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UploadedMediaFile } from '../media/media.service';
-import { UploadMedia } from '../media/upload-media.decorator';
+import { UploadImage } from '../media/upload-media.decorator';
 import { CurrentUser } from './current-user.decorator';
 import { UpdateGuestProfileDto } from './dto/update-guest-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -38,7 +39,8 @@ export class UsersController {
   }
 
   @Post('me/avatar')
-  @UploadMedia()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UploadImage()
   uploadAvatar(
     @CurrentUser() user: AuthenticatedRequest['user'],
     @UploadedFile() file: UploadedMediaFile | undefined,
