@@ -2,14 +2,13 @@ import { BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import sharp from 'sharp';
+import { Readable } from 'stream';
 import { MediaType } from '../generated/prisma/client';
 import { MAX_IMAGE_BYTES } from './media-file';
 import { MediaService } from './media.service';
 import { MediaStorage } from './media-storage';
 
-const png = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0,
-]);
 const mp4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
   Buffer.from('ftypisom', 'latin1'),
@@ -23,11 +22,22 @@ const quicktime = Buffer.concat([
 
 describe('MediaService', () => {
   let directory: string;
+  let png: Buffer;
   let put: jest.Mock;
   let service: MediaService;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'media-spec-'));
+    png = await sharp({
+      create: {
+        width: 2,
+        height: 2,
+        channels: 3,
+        background: '#ffffff',
+      },
+    })
+      .png()
+      .toBuffer();
     put = jest.fn().mockResolvedValue(undefined);
     const storage: MediaStorage = {
       put,
@@ -84,6 +94,50 @@ describe('MediaService', () => {
       service.store(await fileWith(Buffer.from('<?php echo 1; ?>')), 'p', [
         MediaType.IMAGE,
         MediaType.VIDEO,
+      ]),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('remove metadados EXIF com coordenadas GPS antes do storage', async () => {
+    const jpeg = await sharp({
+      create: {
+        width: 2,
+        height: 2,
+        channels: 3,
+        background: '#ffffff',
+      },
+    })
+      .jpeg()
+      .withExif({
+        IFD3: {
+          GPSLatitudeRef: 'S',
+          GPSLatitude: '23/1 33/1 0/1',
+          GPSLongitudeRef: 'W',
+          GPSLongitude: '46/1 38/1 0/1',
+        },
+      })
+      .toBuffer();
+
+    await service.store(await fileWith(jpeg), 'properties/p1', [
+      MediaType.IMAGE,
+    ]);
+
+    const uploaded = put.mock.calls[0][0] as { body: Readable };
+    const chunks: Buffer[] = [];
+    for await (const chunk of uploaded.body) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const metadata = await sharp(Buffer.concat(chunks)).metadata();
+    expect(metadata.exif).toBeUndefined();
+  });
+
+  it('recusa arquivo inválido mesmo quando o cabeçalho imita JPEG', async () => {
+    const fakeJpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02]);
+
+    await expect(
+      service.store(await fileWith(fakeJpeg), 'properties/p1', [
+        MediaType.IMAGE,
       ]),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(put).not.toHaveBeenCalled();

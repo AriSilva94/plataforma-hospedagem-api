@@ -7,6 +7,8 @@ import {
 import { randomUUID } from 'crypto';
 import { createReadStream } from 'fs';
 import { open } from 'fs/promises';
+import sharp from 'sharp';
+import { Readable } from 'stream';
 import { MediaType } from '../generated/prisma/client';
 import {
   MEDIA_HEADER_BYTES,
@@ -55,20 +57,33 @@ export class MediaService {
       );
     }
 
+    const sanitizedImage =
+      format.type === MediaType.IMAGE
+        ? await sanitizeImage(file.path, format.extension)
+        : undefined;
+    const storedSize = sanitizedImage?.length ?? file.size;
+    if (storedSize > maxBytesFor(format.type)) {
+      throw new PayloadTooLargeException(
+        `O arquivo excede o limite de ${maxBytesFor(format.type) / (1024 * 1024)} MB.`,
+      );
+    }
+
     const folder = format.type === MediaType.IMAGE ? 'images' : 'videos';
     const storageKey = `assets/${folder}/${keyPrefix}/${randomUUID()}.${format.extension}`;
     await this.storage.put({
       key: storageKey,
-      body: createReadStream(file.path),
+      body: sanitizedImage
+        ? Readable.from([sanitizedImage])
+        : createReadStream(file.path),
       contentType: format.mimeType,
-      sizeBytes: file.size,
+      sizeBytes: storedSize,
     });
 
     return {
       type: format.type,
       storageKey,
       mimeType: format.mimeType,
-      sizeBytes: file.size,
+      sizeBytes: storedSize,
     };
   }
 
@@ -120,6 +135,23 @@ export class MediaService {
         'A nova ordem deve conter exatamente as mídias atuais.',
       );
     }
+  }
+}
+
+async function sanitizeImage(path: string, expectedExtension: string) {
+  try {
+    const { data, info } = await sharp(path, { animated: true })
+      .rotate()
+      .toBuffer({ resolveWithObject: true });
+    const decodedExtension = info.format === 'jpeg' ? 'jpg' : info.format;
+    if (decodedExtension !== expectedExtension) {
+      throw new Error('Formato decodificado não corresponde ao cabeçalho.');
+    }
+    return data;
+  } catch {
+    throw new BadRequestException(
+      'A imagem está corrompida ou contém dados inválidos.',
+    );
   }
 }
 
