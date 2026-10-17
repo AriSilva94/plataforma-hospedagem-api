@@ -8,7 +8,12 @@ import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { EmailQueue } from './email-queue';
 
 type GoogleTokenResponse = { id_token: string };
-type GoogleIdentity = { subject: string; email: string; name: string };
+type GoogleIdentity = {
+  subject: string;
+  email: string;
+  name: string;
+  emailAuthority: boolean;
+};
 
 @Injectable()
 export class GoogleAuthService {
@@ -70,6 +75,11 @@ export class GoogleAuthService {
           });
           let user: User;
           if (existingUser) {
+            if (!identity.emailAuthority) {
+              throw new UnauthorizedException(
+                'Não foi possível vincular esta conta Google automaticamente.',
+              );
+            }
             await transaction.authSession.updateMany({
               where: { userId: existingUser.id, revokedAt: null },
               data: { revokedAt: new Date() },
@@ -192,10 +202,21 @@ export class GoogleAuthService {
           'Não foi possível autenticar com Google.',
         );
       }
+      const email = payload.email.toLowerCase();
+      const emailDomain = email.slice(email.lastIndexOf('@') + 1);
+      const hostedDomain =
+        typeof payload.hd === 'string' ? payload.hd.toLowerCase() : undefined;
+      if (payload.hd !== undefined && !hostedDomain) {
+        throw new UnauthorizedException(
+          'Não foi possível autenticar com Google.',
+        );
+      }
       return {
         subject: payload.sub,
-        email: payload.email.toLowerCase(),
+        email,
         name: payload.name,
+        emailAuthority:
+          emailDomain === 'gmail.com' || hostedDomain === emailDomain,
       };
     } catch {
       throw new UnauthorizedException(
