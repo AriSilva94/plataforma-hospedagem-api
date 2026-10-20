@@ -1,4 +1,9 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
 
@@ -17,7 +22,6 @@ describe('AuthService', () => {
   const registration = {
     name: user.name,
     email: user.email,
-    password: 'a-safe-password',
   };
 
   function createService() {
@@ -36,6 +40,7 @@ describe('AuthService', () => {
     const passwordService = {
       hash: jest.fn().mockResolvedValue('hashed-password'),
       verify: jest.fn(),
+      verifyIfPresent: jest.fn(),
     } as unknown as PasswordService;
     const tokens = {
       createSession: jest.fn(),
@@ -54,6 +59,11 @@ describe('AuthService', () => {
       enqueuePasswordChanged: jest.fn().mockResolvedValue(undefined),
     };
     const mediaService = { publicUrl: jest.fn().mockReturnValue(null) };
+    const loginAttempts = {
+      assertAllowed: jest.fn().mockResolvedValue(undefined),
+      recordFailure: jest.fn().mockResolvedValue(undefined),
+      clear: jest.fn().mockResolvedValue(undefined),
+    };
 
     return {
       service: new AuthService(
@@ -63,12 +73,14 @@ describe('AuthService', () => {
         email as never,
         queue as never,
         mediaService as never,
+        loginAttempts as never,
       ),
       prisma,
       passwordService,
       tokens,
       email,
       queue,
+      loginAttempts,
     };
   }
 
@@ -85,7 +97,6 @@ describe('AuthService', () => {
       data: {
         name: user.name,
         email: user.email,
-        passwordHash: 'hashed-password',
         expiresAt: expect.any(Date) as Date,
       },
     });
@@ -189,25 +200,63 @@ describe('AuthService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('rejeita login com senha inválida sem expor a existência da conta', async () => {
-    const { service, prisma, passwordService } = createService();
+  it('rejeita login com senha inválida e conta a falha do e-mail', async () => {
+    const { service, prisma, passwordService, loginAttempts } = createService();
     prisma.user.findUnique.mockResolvedValue(user);
-    passwordService.verify = jest.fn().mockResolvedValue(false);
+    passwordService.verifyIfPresent = jest.fn().mockResolvedValue(false);
 
     await expect(
       service.login({ email: user.email, password: 'wrong-password' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(loginAttempts.recordFailure).toHaveBeenCalledWith(user.email);
+    expect(loginAttempts.clear).not.toHaveBeenCalled();
   });
 
-  it('rejeita login de conta sem senha sem verificar a senha', async () => {
-    const { service, prisma, passwordService } = createService();
-    prisma.user.findUnique.mockResolvedValue({ ...user, passwordHash: null });
-    const verifyPassword = jest.fn();
-    passwordService.verify = verifyPassword;
+  it.each([
+    ['e-mail sem conta', null],
+    ['conta sem senha', { ...user, passwordHash: null }],
+  ])(
+    'verifica a senha mesmo para %s, sem revelar a conta pelo tempo',
+    async (_case, found) => {
+      const { service, prisma, passwordService, loginAttempts } =
+        createService();
+      prisma.user.findUnique.mockResolvedValue(found);
+      const verifyIfPresent = jest.fn().mockResolvedValue(false);
+      passwordService.verifyIfPresent = verifyIfPresent;
+
+      await expect(
+        service.login({ email: user.email, password: 'a-safe-password' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(verifyIfPresent).toHaveBeenCalledWith(
+        found?.passwordHash,
+        'a-safe-password',
+      );
+      expect(loginAttempts.recordFailure).toHaveBeenCalledWith(user.email);
+    },
+  );
+
+  it('bloqueia o login do e-mail que excedeu as falhas sem consultar a conta', async () => {
+    const { service, prisma, loginAttempts } = createService();
+    loginAttempts.assertAllowed.mockRejectedValue(
+      new HttpException('Muitas tentativas', HttpStatus.TOO_MANY_REQUESTS),
+    );
 
     await expect(
       service.login({ email: user.email, password: 'a-safe-password' }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(verifyPassword).not.toHaveBeenCalled();
+    ).rejects.toBeInstanceOf(HttpException);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('zera as falhas do e-mail no login bem-sucedido', async () => {
+    const { service, prisma, passwordService, tokens, loginAttempts } =
+      createService();
+    prisma.user.findUnique.mockResolvedValue(user);
+    passwordService.verifyIfPresent = jest.fn().mockResolvedValue(true);
+    tokens.createSession.mockResolvedValue({});
+
+    await service.login({ email: user.email, password: 'a-safe-password' });
+
+    expect(loginAttempts.clear).toHaveBeenCalledWith(user.email);
+    expect(loginAttempts.recordFailure).not.toHaveBeenCalled();
   });
 });

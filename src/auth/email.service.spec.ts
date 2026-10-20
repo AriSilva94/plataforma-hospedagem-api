@@ -131,6 +131,20 @@ describe('EmailService', () => {
     expect(message.text).toContain('O link vale por 24 horas');
   });
 
+  it('envia a conclusão do cadastro com o token no fragmento do link', async () => {
+    const { service, sendMail } = createService();
+
+    await service.sendRegistrationConfirmation('guest@example.com', 'token');
+
+    const message = sendMail.mock.calls[0][0];
+    const completeUrl =
+      'https://domusx-dev.arisilva.tech/concluir-cadastro#token=token';
+    expect(message.subject).toBe('Conclua seu cadastro na DOMUS X');
+    expect(message.text).toContain(completeUrl);
+    expect(message.html).toContain(`href="${completeUrl}"`);
+    expect(message.text).toContain('O link vale por 24 horas');
+  });
+
   it('avisa o titular quando tentam cadastrar um e-mail que já tem conta', async () => {
     const { service, sendMail } = createService();
 

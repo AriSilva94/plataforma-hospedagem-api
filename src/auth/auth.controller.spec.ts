@@ -57,9 +57,10 @@ describe('AuthController session cookies', () => {
         {
           provide: EmailVerificationService,
           useValue: {
-            confirm: jest
+            confirm: jest.fn().mockResolvedValue(undefined),
+            completeRegistration: jest
               .fn()
-              .mockResolvedValue({ kind: 'registered', tokens, user: {} }),
+              .mockResolvedValue({ ...tokens, user: {} }),
           },
         },
       ],
@@ -88,7 +89,16 @@ describe('AuthController session cookies', () => {
     expect(response.headers['set-cookie']).toBeUndefined();
   });
 
-  it.each(['login', 'verify-email', 'refresh', 'logout'])(
+  it('não emite sessão ao verificar o e-mail de uma conta existente', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/verify-email')
+      .send({});
+
+    expect(response.status).toBe(200);
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it.each(['login', 'complete-registration', 'refresh', 'logout'])(
     'uses the shared domain for %s cookies',
     async (endpoint) => {
       domain = 'hml.example.com';

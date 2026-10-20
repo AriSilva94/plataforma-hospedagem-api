@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, UnauthorizedException } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
@@ -8,6 +8,7 @@ import { configureApplication } from '../src/app.config';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { AuthService } from '../src/auth/auth.service';
 import { EmailService } from '../src/auth/email.service';
+import { MAX_LOGIN_FAILURES } from '../src/auth/login-attempts';
 import { TokenService } from '../src/auth/token.service';
 import { createVerifiedAccount, waitFor } from './support/e2e';
 import { GoogleAuthService } from '../src/auth/google-auth.service';
@@ -30,6 +31,9 @@ describe('Segurança de autenticação (e2e)', () => {
   const sendEmailConfirmation = jest
     .fn<Promise<void>, [string, string]>()
     .mockResolvedValue(undefined);
+  const sendRegistrationConfirmation = jest
+    .fn<Promise<void>, [string, string]>()
+    .mockResolvedValue(undefined);
   const sendAccountExists = jest
     .fn<Promise<void>, [string]>()
     .mockResolvedValue(undefined);
@@ -42,6 +46,7 @@ describe('Segurança de autenticação (e2e)', () => {
         sendPasswordReset,
         sendPasswordChanged,
         sendEmailConfirmation,
+        sendRegistrationConfirmation,
         sendAccountExists,
         sendWelcome: jest.fn().mockResolvedValue(undefined),
       })
@@ -71,7 +76,6 @@ describe('Segurança de autenticação (e2e)', () => {
       .send({
         name: 'Admin',
         email: 'invalid@example.com',
-        password,
         role: 'ADMIN',
       })
       .expect(400);
@@ -80,7 +84,6 @@ describe('Segurança de autenticação (e2e)', () => {
       .send({
         name: 'Admin',
         email: 'invalid@example.com',
-        password,
         role: 'GUEST',
         status: 'ACTIVE',
       })
@@ -678,7 +681,7 @@ describe('Segurança de autenticação (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ name: 'Outra pessoa', email: session.user.email, password })
+      .send({ name: 'Outra pessoa', email: session.user.email })
       .expect(202)
       .expect({
         message: 'Enviamos um link de confirmação para o e-mail informado.',
@@ -688,7 +691,7 @@ describe('Segurança de autenticação (e2e)', () => {
       sendAccountExists.mock.calls.some(([to]) => to === session.user.email),
     );
     expect(
-      sendEmailConfirmation.mock.calls.some(
+      sendRegistrationConfirmation.mock.calls.some(
         ([to]) => to === session.user.email,
       ),
     ).toBe(false);
@@ -704,11 +707,11 @@ describe('Segurança de autenticação (e2e)', () => {
 
   it('recusa link de cadastro expirado sem criar conta', async () => {
     const email = `expired-${randomUUID()}@example.com`;
-    await auth.register({ name: 'Cadastro expirado', email, password });
+    await auth.register({ name: 'Cadastro expirado', email });
     await waitFor(() =>
-      sendEmailConfirmation.mock.calls.some(([to]) => to === email),
+      sendRegistrationConfirmation.mock.calls.some(([to]) => to === email),
     );
-    const token = sendEmailConfirmation.mock.calls.find(
+    const token = sendRegistrationConfirmation.mock.calls.find(
       ([to]) => to === email,
     )?.[1];
     await prisma.pendingRegistration.updateMany({
@@ -717,13 +720,80 @@ describe('Segurança de autenticação (e2e)', () => {
     });
 
     await request(app.getHttpServer())
-      .post('/auth/verify-email')
-      .send({ token })
+      .post('/auth/complete-registration')
+      .send({ token, password })
       .expect(401);
     await expect(
       prisma.user.findUnique({ where: { email } }),
     ).resolves.toBeNull();
     await prisma.pendingRegistration.deleteMany({ where: { email } });
+  });
+
+  it('cria a conta com a senha de quem abriu o link, mesmo vindo do cadastro de outra pessoa', async () => {
+    const email = `victim-${randomUUID()}@example.com`;
+    const attackerPassword = 'senha-do-atacante';
+    const victimPassword = 'senha-da-vitima-1';
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ name: 'Atacante', email, password: attackerPassword })
+      .expect(400);
+    await auth.register({ name: 'Atacante', email });
+    await waitFor(() =>
+      sendRegistrationConfirmation.mock.calls.some(([to]) => to === email),
+    );
+    await auth.register({ name: 'Vítima', email });
+    const links = sendRegistrationConfirmation.mock.calls.filter(
+      ([to]) => to === email,
+    );
+    expect(links).toHaveLength(1);
+
+    const completion = await request(app.getHttpServer())
+      .post('/auth/complete-registration')
+      .send({ token: links[0][1], password: victimPassword })
+      .expect(200);
+    userIds.push((completion.body as { user: { id: string } }).user.id);
+
+    await expect(
+      auth.login({ email, password: attackerPassword }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      auth.login({ email, password: victimPassword }),
+    ).resolves.toMatchObject({ user: { email } });
+    await expect(
+      prisma.pendingRegistration.count({ where: { email } }),
+    ).resolves.toBe(0);
+  });
+
+  it('bloqueia o login por e-mail após falhas vindas de IPs diferentes', async () => {
+    const session = await account();
+    const other = await account();
+    const previousSecret = process.env.INTERNAL_API_SECRET;
+    process.env.INTERNAL_API_SECRET = 'e2e-internal-secret';
+    const loginFrom = (index: number, body: object) =>
+      request(app.getHttpServer())
+        .post('/auth/login')
+        .set('X-Internal-Secret', 'e2e-internal-secret')
+        .set('X-Client-IP', `10.0.${Math.floor(index / 250)}.${index % 250}`)
+        .send(body);
+
+    try {
+      for (let attempt = 0; attempt < MAX_LOGIN_FAILURES; attempt += 1) {
+        await loginFrom(attempt, {
+          email: session.user.email,
+          password: 'senha-errada-123',
+        }).expect(401);
+      }
+      await loginFrom(MAX_LOGIN_FAILURES, {
+        email: session.user.email,
+        password,
+      }).expect(429);
+      await loginFrom(MAX_LOGIN_FAILURES + 1, {
+        email: other.user.email,
+        password,
+      }).expect(200);
+    } finally {
+      process.env.INTERNAL_API_SECRET = previousSecret;
+    }
   });
 
   it('confirma o e-mail de uma conta existente pelo link pedido no perfil', async () => {

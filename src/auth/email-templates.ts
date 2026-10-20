@@ -289,6 +289,24 @@ export function emailConfirmationEmail(
   });
 }
 
+export function registrationConfirmationEmail(
+  completeUrl: string,
+  validityMinutes: number,
+): EmailMessage {
+  return oneTimeLinkEmail({
+    subject: `Conclua seu cadastro na ${BRAND}`,
+    title: 'Conclua seu cadastro',
+    request: `Confirme que este e-mail é seu para criar sua conta ${BRAND_NOWRAP}.`,
+    instruction: 'Use o botão abaixo para definir a senha de acesso.',
+    action: 'Concluir cadastro',
+    url: completeUrl,
+    validityMinutes,
+    reassurance:
+      'Ignore este e-mail. Nenhuma conta é criada sem que você defina a senha.',
+    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
+  });
+}
+
 export function accountExistsEmail(
   loginUrl: string,
   recoverUrl: string,

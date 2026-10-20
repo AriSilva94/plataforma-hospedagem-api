@@ -16,6 +16,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailQueue } from './email-queue';
 import { EMAIL_VERIFICATION_VALIDITY_MINUTES } from './email-verification.policy';
 import { EmailService } from './email.service';
+import { LoginAttempts } from './login-attempts';
 import { generateToken, hashToken, minutesFromNow } from './one-time-token';
 import { PASSWORD_RESET_VALIDITY_MINUTES } from './password-reset.policy';
 import { PasswordService } from './password.service';
@@ -32,15 +33,14 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly emailQueue: EmailQueue,
     private readonly mediaService: MediaService,
+    private readonly loginAttempts: LoginAttempts,
   ) {}
 
   async register(dto: RegisterDto): Promise<void> {
-    const passwordHash = await this.passwordService.hash(dto.password);
     const pending = await this.prisma.pendingRegistration.create({
       data: {
         name: dto.name,
         email: dto.email,
-        passwordHash,
         expiresAt: minutesFromNow(EMAIL_VERIFICATION_VALIDITY_MINUTES),
       },
     });
@@ -48,17 +48,21 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {
+    await this.loginAttempts.assertAllowed(dto.email);
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    const isValidPassword =
-      user?.passwordHash &&
-      (await this.passwordService.verify(user.passwordHash, dto.password));
+    const isValidPassword = await this.passwordService.verifyIfPresent(
+      user?.passwordHash,
+      dto.password,
+    );
 
-    if (!isValidPassword || user.status !== 'ACTIVE') {
+    if (!user || !isValidPassword || user.status !== 'ACTIVE') {
+      await this.loginAttempts.recordFailure(dto.email);
       throw new UnauthorizedException('E-mail ou senha inválidos.');
     }
 
+    await this.loginAttempts.clear(dto.email);
     const tokens = await this.tokenService.createSession(user);
     return {
       ...tokens,

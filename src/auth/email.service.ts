@@ -7,6 +7,7 @@ import {
   emailConfirmationEmail,
   passwordChangedEmail,
   passwordResetEmail,
+  registrationConfirmationEmail,
   welcomeEmail,
 } from './email-templates';
 import { EMAIL_VERIFICATION_VALIDITY_MINUTES } from './email-verification.policy';
@@ -54,6 +55,22 @@ export class EmailService implements OnApplicationShutdown {
       email,
       emailConfirmationEmail(
         confirmUrl.toString(),
+        EMAIL_VERIFICATION_VALIDITY_MINUTES,
+      ),
+    );
+  }
+
+  async sendRegistrationConfirmation(
+    email: string,
+    token: string,
+  ): Promise<void> {
+    const completeUrl = this.frontendUrl('/concluir-cadastro');
+    completeUrl.hash = new URLSearchParams({ token }).toString();
+
+    await this.send(
+      email,
+      registrationConfirmationEmail(
+        completeUrl.toString(),
         EMAIL_VERIFICATION_VALIDITY_MINUTES,
       ),
     );
