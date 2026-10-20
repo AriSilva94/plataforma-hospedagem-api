@@ -13,10 +13,11 @@ import {
   UploadedFile,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import type { UploadedMediaFile } from '../media/media.service';
-import { UploadMedia } from '../media/upload-media.decorator';
+import { UploadImage } from '../media/upload-media.decorator';
 import { CurrentUser } from '../users/current-user.decorator';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
@@ -70,7 +71,8 @@ export class RoomsController {
   }
 
   @Post('rooms/:roomId/media')
-  @UploadMedia()
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UploadImage()
   addMedia(
     @CurrentUser() user: User,
     @Param('roomId', ParseUUIDPipe) roomId: string,

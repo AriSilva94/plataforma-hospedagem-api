@@ -35,12 +35,13 @@ describe('Health endpoint (e2e)', () => {
       .expect({ status: 'ok', revision: 'test-revision' });
   });
 
-  it('cria a conta somente após a confirmação do e-mail', async () => {
+  it('cria a conta somente quando o titular do e-mail define a senha', async () => {
     const email = `user-${randomUUID()}@example.com`;
     const prisma = app.get(PrismaService);
-    const sendEmailConfirmation = jest.spyOn(
+    const password = 'uma-senha-segura';
+    const sendRegistrationConfirmation = jest.spyOn(
       app.get(EmailService),
-      'sendEmailConfirmation',
+      'sendRegistrationConfirmation',
     );
 
     await request(app.getHttpServer())
@@ -48,7 +49,6 @@ describe('Health endpoint (e2e)', () => {
       .send({
         name: 'Usuário de teste',
         email,
-        password: 'uma-senha-segura',
       })
       .expect(202)
       .expect(({ headers }: { headers: unknown }) => {
@@ -59,13 +59,21 @@ describe('Health endpoint (e2e)', () => {
     ).resolves.toBeNull();
 
     const sentTo = () =>
-      sendEmailConfirmation.mock.calls.find(([to]) => to === email);
+      sendRegistrationConfirmation.mock.calls.find(([to]) => to === email);
     await waitFor(() => sentTo() !== undefined);
     const token = sentTo()?.[1];
 
-    const confirmation = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/auth/verify-email')
       .send({ token })
+      .expect(401);
+    await expect(
+      prisma.user.findUnique({ where: { email } }),
+    ).resolves.toBeNull();
+
+    const confirmation = await request(app.getHttpServer())
+      .post('/auth/complete-registration')
+      .send({ token, password })
       .expect(200);
     const sessionCookies = getHeaderValues(confirmation.headers, 'set-cookie');
     expect(sessionCookies).toHaveLength(2);
@@ -86,9 +94,13 @@ describe('Health endpoint (e2e)', () => {
         expect(body).not.toHaveProperty('passwordHash');
       });
     await request(app.getHttpServer())
-      .post('/auth/verify-email')
-      .send({ token })
+      .post('/auth/complete-registration')
+      .send({ token, password: 'outra-senha-segura' })
       .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email, password })
+      .expect(200);
     await prisma.user.deleteMany({ where: { email } });
   });
 

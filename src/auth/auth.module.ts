@@ -8,6 +8,7 @@ import { EmailService } from './email.service';
 import { EmailWorker } from './email-worker';
 import { GoogleAuthService } from './google-auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { LoginAttempts } from './login-attempts';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
@@ -24,6 +25,7 @@ import { TokenService } from './token.service';
     EmailVerificationService,
     EmailWorker,
     JwtAuthGuard,
+    LoginAttempts,
   ],
   exports: [JwtAuthGuard, TokenService],
 })

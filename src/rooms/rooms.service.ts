@@ -157,6 +157,14 @@ export class RoomsService {
     file: UploadedMediaFile | undefined,
   ) {
     await this.findOwnedRoom(this.prisma, userId, roomId);
+    const currentCount = await this.prisma.roomMedia.count({
+      where: { roomId },
+    });
+    if (currentCount >= MAX_ROOM_IMAGES) {
+      throw new UnprocessableEntityException(
+        `O quarto pode ter no máximo ${MAX_ROOM_IMAGES} fotos.`,
+      );
+    }
     const stored = await this.mediaService.store(file, `rooms/${roomId}`, [
       MediaType.IMAGE,
     ]);

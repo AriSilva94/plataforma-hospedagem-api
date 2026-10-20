@@ -10,6 +10,7 @@ type MediaFormat = {
 const MB = 1024 * 1024;
 
 export const MAX_IMAGE_BYTES = 10 * MB;
+export const MAX_IMAGE_PIXELS = 50_000_000;
 export const MAX_VIDEO_BYTES = 100 * MB;
 export const MEDIA_HEADER_BYTES = 16;
 

@@ -369,6 +369,57 @@ describe('Imóveis e quartos (e2e)', () => {
     });
   });
 
+  it('recusa nova foto antes do storage quando o quarto já atingiu o limite', async () => {
+    const owner = await account();
+    const property = await createProperty(owner);
+    const room = await createRoom(owner, property.id);
+    await prisma.roomMedia.createMany({
+      data: Array.from({ length: 20 }, (_, position) => ({
+        roomId: room.id,
+        type: 'IMAGE' as const,
+        storageKey: `test/room-limit/${room.id}/${position}.png`,
+        mimeType: 'image/png',
+        sizeBytes: png.length,
+        position,
+      })),
+    });
+    const previousPutCount = storage.putCount;
+
+    await upload(
+      owner,
+      `/owner/rooms/${room.id}/media`,
+      png,
+      'extra.png',
+    ).expect(422);
+
+    expect(storage.putCount).toBe(previousPutCount);
+  });
+
+  it('recusa nova mídia antes do storage quando o imóvel já atingiu o limite', async () => {
+    const owner = await account();
+    const property = await createProperty(owner);
+    await prisma.propertyMedia.createMany({
+      data: Array.from({ length: 30 }, (_, position) => ({
+        propertyId: property.id,
+        type: 'IMAGE' as const,
+        storageKey: `test/property-limit/${property.id}/${position}.png`,
+        mimeType: 'image/png',
+        sizeBytes: png.length,
+        position,
+      })),
+    });
+    const previousPutCount = storage.putCount;
+
+    await upload(
+      owner,
+      `/owner/properties/${property.id}/media`,
+      png,
+      'extra.png',
+    ).expect(422);
+
+    expect(storage.putCount).toBe(previousPutCount);
+  });
+
   it('valida áreas compartilhadas e dados do quarto no backend', async () => {
     const owner = await account();
     const property = await createProperty(owner);

@@ -1,16 +1,14 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { isUniqueConstraintError } from '../infrastructure/prisma/prisma-error';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
-import { PublicUser, toPublicUser } from '../users/public-user';
+import { toPublicUser } from '../users/public-user';
+import type { AuthResult } from './auth.service';
 import { EmailQueue } from './email-queue';
 import { EMAIL_VERIFICATION_VALIDITY_MINUTES } from './email-verification.policy';
 import { EmailService } from './email.service';
 import { generateToken, hashToken, minutesFromNow } from './one-time-token';
-import { AuthTokens, TokenService } from './token.service';
-
-export type EmailConfirmation =
-  | { kind: 'registered'; tokens: AuthTokens; user: PublicUser }
-  | { kind: 'verified' };
+import { PasswordService } from './password.service';
+import { TokenService } from './token.service';
 
 @Injectable()
 export class EmailVerificationService {
@@ -19,6 +17,7 @@ export class EmailVerificationService {
     private readonly tokenService: TokenService,
     private readonly emailService: EmailService,
     private readonly emailQueue: EmailQueue,
+    private readonly passwordService: PasswordService,
   ) {}
 
   async issueForRegistration(pendingRegistrationId: string): Promise<void> {
@@ -49,7 +48,7 @@ export class EmailVerificationService {
       where: { id: pending.id },
       data: { tokenHash },
     });
-    await this.emailService.sendEmailConfirmation(pending.email, token);
+    await this.emailService.sendRegistrationConfirmation(pending.email, token);
   }
 
   async requestForUser(userId: string): Promise<void> {
@@ -76,27 +75,18 @@ export class EmailVerificationService {
     await this.emailService.sendEmailConfirmation(user.email, token);
   }
 
-  async confirm(token: string): Promise<EmailConfirmation> {
-    const tokenHash = hashToken(token);
-    return (
-      (await this.completeRegistration(tokenHash)) ??
-      (await this.verifyExistingAccount(tokenHash))
-    );
-  }
-
-  private async completeRegistration(
-    tokenHash: string,
-  ): Promise<EmailConfirmation | undefined> {
+  async completeRegistration(
+    token: string,
+    password: string,
+  ): Promise<AuthResult> {
     const pending = await this.prisma.pendingRegistration.findUnique({
-      where: { tokenHash },
+      where: { tokenHash: hashToken(token) },
     });
-    if (!pending) {
-      return undefined;
-    }
-    if (pending.expiresAt <= new Date()) {
+    if (!pending || pending.expiresAt <= new Date()) {
       throw invalidLink();
     }
 
+    const passwordHash = await this.passwordService.hash(password);
     try {
       const user = await this.prisma.$transaction(async (transaction) => {
         const consumed = await transaction.pendingRegistration.deleteMany({
@@ -109,7 +99,7 @@ export class EmailVerificationService {
           data: {
             name: pending.name,
             email: pending.email,
-            passwordHash: pending.passwordHash,
+            passwordHash,
             emailVerifiedAt: new Date(),
             roles: [],
           },
@@ -117,7 +107,7 @@ export class EmailVerificationService {
       });
       const tokens = await this.tokenService.createSession(user);
       await this.emailQueue.enqueueWelcome(user.id);
-      return { kind: 'registered', tokens, user: toPublicUser(user, null) };
+      return { ...tokens, user: toPublicUser(user, null) };
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw invalidLink();
@@ -126,11 +116,9 @@ export class EmailVerificationService {
     }
   }
 
-  private async verifyExistingAccount(
-    tokenHash: string,
-  ): Promise<EmailConfirmation> {
+  async confirm(token: string): Promise<void> {
     const verification = await this.prisma.emailVerificationToken.findUnique({
-      where: { tokenHash },
+      where: { tokenHash: hashToken(token) },
     });
     if (!verification || verification.expiresAt <= new Date()) {
       throw invalidLink();
@@ -148,7 +136,6 @@ export class EmailVerificationService {
         throw invalidLink();
       }
     });
-    return { kind: 'verified' };
   }
 }
 

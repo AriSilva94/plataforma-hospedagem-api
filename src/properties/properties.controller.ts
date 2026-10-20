@@ -13,10 +13,11 @@ import {
   UploadedFile,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import type { UploadedMediaFile } from '../media/media.service';
-import { UploadMedia } from '../media/upload-media.decorator';
+import { UploadPropertyMedia } from '../media/upload-media.decorator';
 import { CurrentUser } from '../users/current-user.decorator';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
@@ -86,7 +87,8 @@ export class PropertiesController {
   }
 
   @Post(':propertyId/media')
-  @UploadMedia()
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UploadPropertyMedia()
   addMedia(
     @CurrentUser() user: User,
     @Param('propertyId', ParseUUIDPipe) propertyId: string,

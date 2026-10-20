@@ -17,8 +17,10 @@ type ProfileRole = 'GUEST' | 'OWNER';
 
 export class InMemoryMediaStorage extends MediaStorage {
   readonly objects = new Map<string, string>();
+  putCount = 0;
 
   async put({ key, body, contentType }: MediaObject) {
+    this.putCount += 1;
     body.resume();
     await finished(body);
     this.objects.set(key, contentType);
@@ -34,9 +36,10 @@ export class InMemoryMediaStorage extends MediaStorage {
   }
 }
 
-export const png = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d,
-]);
+export const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
 
 export const publishableAddress = {
   description: 'Casa ampla perto do centro.',

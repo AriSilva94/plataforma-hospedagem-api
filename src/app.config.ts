@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { csrfProtection } from './infrastructure/security/csrf-protection.middleware';
 
 export function configureApplication(app: INestApplication): void {
   app.use(
@@ -20,6 +21,7 @@ export function configureApplication(app: INestApplication): void {
     }),
   );
   app.use(cookieParser());
+  app.use(csrfProtection(process.env.FRONTEND_URL ?? 'http://localhost:3000'));
   app.enableCors({ origin: process.env.FRONTEND_URL, credentials: true });
   app.useGlobalPipes(
     new ValidationPipe({

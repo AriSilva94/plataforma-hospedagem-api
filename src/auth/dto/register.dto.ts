@@ -11,9 +11,4 @@ export class RegisterDto {
   @NormalizeEmail()
   @IsEmail()
   email!: string;
-
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  password!: string;
 }

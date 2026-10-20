@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AuthResult, AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CompleteRegistrationDto } from './dto/complete-registration.dto';
 import { DeactivateAccountDto } from './dto/deactivate-account.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -92,17 +93,27 @@ export class AuthController {
     };
   }
 
+  @Post('complete-registration')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async completeRegistration(
+    @Body() dto: CompleteRegistrationDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.respondWithSession(
+      await this.emailVerificationService.completeRegistration(
+        dto.token,
+        dto.password,
+      ),
+      response,
+    );
+  }
+
   @Post('verify-email')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async verifyEmail(
-    @Body() dto: VerifyEmailDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const confirmation = await this.emailVerificationService.confirm(dto.token);
-    if (confirmation.kind === 'registered') {
-      this.setSessionCookies(response, confirmation.tokens);
-    }
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    await this.emailVerificationService.confirm(dto.token);
     return { verified: true };
   }
 
