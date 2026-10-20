@@ -11,6 +11,7 @@ import sharp from 'sharp';
 import { Readable } from 'stream';
 import { MediaType } from '../generated/prisma/client';
 import {
+  MAX_IMAGE_PIXELS,
   MEDIA_HEADER_BYTES,
   detectMediaFormat,
   maxBytesFor,
@@ -156,7 +157,10 @@ async function inspectFile(
 
 async function sanitizeImage(path: string, expectedExtension: string) {
   try {
-    const { data, info } = await sharp(path, { animated: true })
+    const { data, info } = await sharp(path, {
+      animated: true,
+      limitInputPixels: MAX_IMAGE_PIXELS,
+    })
       .rotate()
       .toBuffer({ resolveWithObject: true });
     const decodedExtension = info.format === 'jpeg' ? 'jpg' : info.format;
@@ -164,7 +168,12 @@ async function sanitizeImage(path: string, expectedExtension: string) {
       throw new Error('Formato decodificado não corresponde ao cabeçalho.');
     }
     return data;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('pixel limit')) {
+      throw new PayloadTooLargeException(
+        `A imagem excede o limite de ${MAX_IMAGE_PIXELS / 1_000_000} megapixels.`,
+      );
+    }
     throw new BadRequestException(
       'A imagem está corrompida ou contém dados inválidos.',
     );

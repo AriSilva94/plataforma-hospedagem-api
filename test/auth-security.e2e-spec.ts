@@ -764,6 +764,32 @@ describe('Segurança de autenticação (e2e)', () => {
     ).resolves.toBe(0);
   });
 
+  it('libera o login bloqueado por falhas quando o titular redefine a senha', async () => {
+    const session = await account();
+    for (let attempt = 0; attempt < MAX_LOGIN_FAILURES; attempt += 1) {
+      await expect(
+        auth.login({ email: session.user.email, password: 'senha-errada-123' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    }
+    await expect(
+      auth.login({ email: session.user.email, password }),
+    ).rejects.toMatchObject({ status: 429 });
+
+    await auth.issuePasswordReset(session.user.email);
+    const token = sendPasswordReset.mock.calls
+      .filter(([email]) => email === session.user.email)
+      .at(-1)?.[1];
+    if (!token) {
+      throw new Error('O envio do token de recuperação não foi registrado.');
+    }
+    const newPassword = 'senha-redefinida-1';
+    await auth.resetPassword({ token, password: newPassword });
+
+    await expect(
+      auth.login({ email: session.user.email, password: newPassword }),
+    ).resolves.toMatchObject({ user: { id: session.user.id } });
+  });
+
   it('bloqueia o login por e-mail após falhas vindas de IPs diferentes', async () => {
     const session = await account();
     const other = await account();

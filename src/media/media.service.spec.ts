@@ -132,6 +132,27 @@ describe('MediaService', () => {
     expect(metadata.exif).toBeUndefined();
   });
 
+  it('recusa imagem pequena em bytes que passa do limite de pixels ao decodificar', async () => {
+    const decompressionBomb = await sharp({
+      create: {
+        width: 10_000,
+        height: 6_000,
+        channels: 3,
+        background: '#ffffff',
+      },
+    })
+      .png()
+      .toBuffer();
+    expect(decompressionBomb.length).toBeLessThan(MAX_IMAGE_BYTES);
+
+    await expect(
+      service.store(await fileWith(decompressionBomb), 'properties/p1', [
+        MediaType.IMAGE,
+      ]),
+    ).rejects.toBeInstanceOf(PayloadTooLargeException);
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it('recusa arquivo inválido mesmo quando o cabeçalho imita JPEG', async () => {
     const fakeJpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02]);
 

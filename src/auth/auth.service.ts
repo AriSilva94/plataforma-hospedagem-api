@@ -103,7 +103,9 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
     const resetToken = await this.prisma.passwordResetToken.findUnique({
       where: { tokenHash: hashToken(dto.token) },
-      include: { user: { select: { status: true, emailVerifiedAt: true } } },
+      include: {
+        user: { select: { email: true, status: true, emailVerifiedAt: true } },
+      },
     });
 
     if (
@@ -151,6 +153,7 @@ export class AuthService {
       });
       await this.revokeSessions(transaction, resetToken.userId);
     });
+    await this.loginAttempts.clear(resetToken.user.email);
     await this.emailQueue.enqueuePasswordChanged(resetToken.userId);
   }
 
