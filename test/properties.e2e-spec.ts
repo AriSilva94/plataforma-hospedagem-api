@@ -136,6 +136,12 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(property).not.toHaveProperty('ownerProfileId');
   });
 
+  it('aceita apartamento como tipo do imóvel', async () => {
+    const owner = await account();
+    const apartment = await createProperty(owner, { type: 'APARTMENT' });
+    expect(apartment).toMatchObject({ type: 'APARTMENT' });
+  });
+
   it('aceita motel como tipo do imóvel no cadastro e na edição', async () => {
     const owner = await account();
     const motel = await createProperty(owner, { type: 'MOTEL' });

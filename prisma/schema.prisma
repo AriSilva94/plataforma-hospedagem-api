@@ -152,6 +152,7 @@ enum GenderIdentity {
 
 enum PropertyType {
   HOUSE
+  APARTMENT
   MOTEL
 }
 
