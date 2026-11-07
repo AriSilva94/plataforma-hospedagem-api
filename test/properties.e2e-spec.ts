@@ -707,6 +707,46 @@ describe('Imóveis e quartos (e2e)', () => {
     await http().get('/rooms?city=Ribeirão Preto&state=XX').expect(400);
   });
 
+  it('filtra a listagem pública por tipo, preço e público aceito', async () => {
+    const cookie = await account();
+    const filter = 'city=Sertãozinho&state=SP&limit=48';
+    const { roomId: motelRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Sertãozinho', state: 'SP', type: 'MOTEL' },
+      room: { priceCents: 8000, acceptedAudiences: ['MAN', 'TRANS_MAN'] },
+    });
+    const { roomId: houseRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Sertãozinho', state: 'SP' },
+      room: { priceCents: 20000, acceptedAudiences: ['WOMAN'] },
+    });
+    const ids = async (query: string) => {
+      const response = await http()
+        .get(`/rooms?${filter}&${query}`)
+        .expect(200);
+      return (response.body as { items: { id: string }[] }).items
+        .map(({ id }) => id)
+        .sort();
+    };
+
+    expect(await ids('types=MOTEL')).toEqual([motelRoom]);
+    expect(await ids('types=HOUSE,APARTMENT')).toEqual([houseRoom]);
+    expect(await ids('minPriceCents=10000')).toEqual([houseRoom]);
+    expect(await ids('maxPriceCents=8000')).toEqual([motelRoom]);
+    expect(await ids('minPriceCents=8000&maxPriceCents=20000')).toEqual(
+      [motelRoom, houseRoom].sort(),
+    );
+    expect(await ids('audience=TRANS_MAN')).toEqual([motelRoom]);
+    expect(await ids('audience=WOMAN&types=MOTEL')).toEqual([]);
+    await http().get(`/rooms/featured?${filter}&types=MOTEL`).expect(200);
+
+    await http().get('/rooms?types=CASTLE').expect(400);
+    await http().get('/rooms?minPriceCents=-1').expect(400);
+    await http().get('/rooms?maxPriceCents=abc').expect(400);
+    await http()
+      .get('/rooms?minPriceCents=2000&maxPriceCents=1000')
+      .expect(400);
+    await http().get('/rooms?audience=OTHER').expect(400);
+  });
+
   afterAll(async () => {
     await accounts?.removeAll();
     await app?.close();
