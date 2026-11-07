@@ -7,6 +7,7 @@ import {
   TestAccounts,
   createE2eApp,
   png,
+  publishProperty,
 } from './support/e2e';
 const mp4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
@@ -629,6 +630,81 @@ describe('Imóveis e quartos (e2e)', () => {
           genderIdentity: 'TRANS_MAN',
         }),
       );
+  });
+
+  it('exige cidade do estado informado no endereço do imóvel', async () => {
+    const cookie = await account();
+    await http()
+      .post('/owner/properties')
+      .set('Cookie', cookie)
+      .send({ title: 'Casa', type: 'HOUSE', city: 'Recife', state: 'SP' })
+      .expect(400);
+    await http()
+      .post('/owner/properties')
+      .set('Cookie', cookie)
+      .send({ title: 'Casa', type: 'HOUSE', city: 'Recife' })
+      .expect(400);
+
+    const property = await createProperty(cookie, completeAddress);
+    await http()
+      .patch(`/owner/properties/${property.id}`)
+      .set('Cookie', cookie)
+      .send({ state: 'RJ' })
+      .expect(400);
+    await http()
+      .patch(`/owner/properties/${property.id}`)
+      .set('Cookie', cookie)
+      .send({ city: 'Sao Paulo' })
+      .expect(400);
+    await http()
+      .patch(`/owner/properties/${property.id}`)
+      .set('Cookie', cookie)
+      .send({ state: 'RJ', city: 'Niterói' })
+      .expect(200)
+      .expect(({ body }: { body: Body }) =>
+        expect(body).toMatchObject({ state: 'RJ', city: 'Niterói' }),
+      );
+  });
+
+  it('busca cidades sem exigir sessão', async () => {
+    await http()
+      .get('/locations/cities?q=niter')
+      .expect(200)
+      .expect('Cache-Control', 'public, max-age=86400')
+      .expect(({ body }: { body: unknown }) =>
+        expect(body).toContainEqual({ city: 'Niterói', state: 'RJ' }),
+      );
+    await http().get('/locations/cities?q=n').expect(400);
+    await http().get('/locations/cities').expect(400);
+    await http().get('/locations/states/RJ/cities').expect(401);
+  });
+
+  it('filtra a listagem pública por cidade e UF', async () => {
+    const cookie = await account();
+    const { roomId } = await publishProperty(app, cookie, {
+      property: { city: 'Ribeirão Preto', state: 'SP' },
+    });
+    type Page = { items: { id: string }[]; total?: number };
+
+    const listed = await http()
+      .get('/rooms?city=ribeirão preto&state=sp&limit=48')
+      .expect(200);
+    const page = listed.body as Page;
+    expect(page.items.map(({ id }) => id)).toContain(roomId);
+    expect(page.total).toBe(page.items.length);
+
+    const elsewhere = await http()
+      .get('/rooms?city=Ribeirão Preto&state=MG')
+      .expect(200);
+    expect((elsewhere.body as Page).items.map(({ id }) => id)).not.toContain(
+      roomId,
+    );
+    await http()
+      .get('/rooms/featured?city=Ribeirão Preto&state=SP')
+      .expect(200);
+    await http().get('/rooms?city=Ribeirão Preto').expect(400);
+    await http().get('/rooms?state=SP').expect(400);
+    await http().get('/rooms?city=Ribeirão Preto&state=XX').expect(400);
   });
 
   afterAll(async () => {

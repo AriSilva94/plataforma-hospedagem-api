@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -11,6 +12,7 @@ import {
   RoomStatus,
 } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { isCityOfState } from '../locations/brazilian-cities';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import {
   MediaService,
@@ -123,6 +125,8 @@ export class PropertiesService {
       );
     }
 
+    assertCityOfState(dto.state, dto.city);
+
     const property = await this.prisma.property.create({
       data: { ...dto, ownerProfileId: ownerProfile.id },
       select: { id: true },
@@ -145,10 +149,12 @@ export class PropertiesService {
   async update(userId: string, propertyId: string, dto: UpdatePropertyDto) {
     await this.prisma.$transaction(async (transaction) => {
       const property = await this.lockOwned(transaction, userId, propertyId);
-      await transaction.property.update({
+      const { state, city } = await transaction.property.update({
         where: { id: propertyId },
         data: dto,
+        select: { state: true, city: true },
       });
+      assertCityOfState(state, city);
       await this.assertListedComplete(transaction, property);
       await this.roomRanking.recalculatePropertyIfChanged(
         transaction,
@@ -482,4 +488,13 @@ export class PropertiesService {
 
 function propertyNotFound() {
   return new NotFoundException('Imóvel não encontrado.');
+}
+
+function assertCityOfState(
+  state: string | null | undefined,
+  city: string | null | undefined,
+) {
+  if (city && (!state || !isCityOfState(state, city))) {
+    throw new BadRequestException('Selecione uma cidade do estado informado.');
+  }
 }

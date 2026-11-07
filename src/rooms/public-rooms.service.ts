@@ -42,7 +42,7 @@ export class PublicRoomsService {
   }
 
   private async paginate(
-    { cursor: encodedCursor, limit }: ListPublicRoomsDto,
+    { cursor: encodedCursor, limit, city, state }: ListPublicRoomsDto,
     featured: boolean,
     featuringWhere: (now: Date) => Prisma.RoomWhereInput,
   ) {
@@ -51,14 +51,22 @@ export class PublicRoomsService {
       : undefined;
     const asOf = cursor?.asOf ?? new Date();
     const startedAt = performance.now();
+    const where: Prisma.RoomWhereInput = {
+      AND: [
+        featuringWhere(asOf),
+        city && state
+          ? { property: { state, city: { equals: city, mode: 'insensitive' } } }
+          : {},
+      ],
+    };
 
     try {
       const [rooms, total] = await Promise.all([
-        this.segment(featuringWhere(asOf), cursor, limit + 1),
+        this.segment(where, cursor, limit + 1),
         cursor
           ? undefined
           : this.prisma.room.count({
-              where: { AND: [listedRoomWhere, featuringWhere(asOf)] },
+              where: { AND: [listedRoomWhere, where] },
             }),
       ]);
       const page = rooms.slice(0, limit);
@@ -74,7 +82,7 @@ export class PublicRoomsService {
           : null;
 
       this.logger.log(
-        `rooms.list featured=${featured} durationMs=${elapsed(startedAt)} results=${page.length} firstPage=${!cursor}`,
+        `rooms.list featured=${featured} filtered=${Boolean(city)} durationMs=${elapsed(startedAt)} results=${page.length} firstPage=${!cursor}`,
       );
 
       return {
@@ -94,17 +102,13 @@ export class PublicRoomsService {
   }
 
   private segment(
-    featuringWhere: Prisma.RoomWhereInput,
+    where: Prisma.RoomWhereInput,
     cursor: RoomListingCursor | undefined,
     take: number,
   ): Promise<PublicRoomCardRow[]> {
     return this.prisma.room.findMany({
       where: {
-        AND: [
-          listedRoomWhere,
-          featuringWhere,
-          cursor ? afterCursorWhere(cursor) : {},
-        ],
+        AND: [listedRoomWhere, where, cursor ? afterCursorWhere(cursor) : {}],
       },
       orderBy: rankingOrder,
       take,
