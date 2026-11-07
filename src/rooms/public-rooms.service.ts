@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
+import { canonicalCityOfState } from '../locations/brazilian-cities';
 import { listedRoomWhere } from '../properties/public-listing';
 import { ListPublicRoomsDto } from './dto/list-public-rooms.dto';
 import {
@@ -116,27 +117,25 @@ function filterWhere({
   city,
   state,
   types,
-  minPriceCents,
   maxPriceCents,
   audience,
 }: Omit<ListPublicRoomsDto, 'cursor' | 'limit'>): Prisma.RoomWhereInput[] {
-  if (
-    minPriceCents !== undefined &&
-    maxPriceCents !== undefined &&
-    minPriceCents > maxPriceCents
-  ) {
-    throw new BadRequestException(
-      'O preço mínimo não pode ser maior que o máximo.',
-    );
-  }
   return [
     city && state
-      ? { property: { state, city: { equals: city, mode: 'insensitive' } } }
+      ? { property: { state, city: canonicalCity(state, city) } }
       : {},
     types?.length ? { property: { type: { in: types } } } : {},
-    { priceCents: { gte: minPriceCents, lte: maxPriceCents } },
+    maxPriceCents === undefined ? {} : { priceCents: { lte: maxPriceCents } },
     audience ? { acceptedAudiences: { has: audience } } : {},
   ];
+}
+
+function canonicalCity(state: string, city: string): string {
+  const canonical = canonicalCityOfState(state, city);
+  if (!canonical) {
+    throw new BadRequestException('Cidade não encontrada na UF informada.');
+  }
+  return canonical;
 }
 
 function afterCursorWhere({

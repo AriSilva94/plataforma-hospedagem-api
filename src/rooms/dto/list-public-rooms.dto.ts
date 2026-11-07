@@ -62,13 +62,6 @@ export class ListPublicRoomsDto {
   @IsInt()
   @Min(0)
   @Max(MAX_PRICE_CENTS)
-  minPriceCents?: number;
-
-  @Type(() => Number)
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(MAX_PRICE_CENTS)
   maxPriceCents?: number;
 
   @IsOptional()

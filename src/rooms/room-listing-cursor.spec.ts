@@ -23,6 +23,14 @@ describe('cursor da listagem de quartos', () => {
     ).toEqual(cursor);
   });
 
+  it('limita o instante de referência a uma hora atrás para não expor destaques antigos', () => {
+    const old = encode([Date.parse('2026-01-01T00:00:00.000Z'), true, 82, id]);
+
+    expect(decodeRoomListingCursor(old, now).asOf).toEqual(
+      new Date('2026-09-30T11:00:00.000Z'),
+    );
+  });
+
   it.each([
     'não-é-base64',
     encode({ a: 1 }),

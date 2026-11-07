@@ -693,12 +693,16 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(page.items.map(({ id }) => id)).toContain(roomId);
     expect(page.total).toBe(page.items.length);
 
-    const elsewhere = await http()
-      .get('/rooms?city=Ribeirão Preto&state=MG')
+    const withoutAccent = await http()
+      .get('/rooms?city=RIBEIRAO PRETO&state=SP&limit=48')
       .expect(200);
-    expect((elsewhere.body as Page).items.map(({ id }) => id)).not.toContain(
+    expect((withoutAccent.body as Page).items.map(({ id }) => id)).toContain(
       roomId,
     );
+
+    await http().get('/rooms?city=Ribeirão Preto&state=MG').expect(400);
+    await http().get('/rooms?city=Ribeir_o Preto&state=SP').expect(400);
+    await http().get('/rooms?city=%25&state=SP').expect(400);
     await http()
       .get('/rooms/featured?city=Ribeirão Preto&state=SP')
       .expect(200);
@@ -729,9 +733,8 @@ describe('Imóveis e quartos (e2e)', () => {
 
     expect(await ids('types=MOTEL')).toEqual([motelRoom]);
     expect(await ids('types=HOUSE,APARTMENT')).toEqual([houseRoom]);
-    expect(await ids('minPriceCents=10000')).toEqual([houseRoom]);
     expect(await ids('maxPriceCents=8000')).toEqual([motelRoom]);
-    expect(await ids('minPriceCents=8000&maxPriceCents=20000')).toEqual(
+    expect(await ids('maxPriceCents=20000')).toEqual(
       [motelRoom, houseRoom].sort(),
     );
     expect(await ids('audience=TRANS_MAN')).toEqual([motelRoom]);
@@ -739,11 +742,8 @@ describe('Imóveis e quartos (e2e)', () => {
     await http().get(`/rooms/featured?${filter}&types=MOTEL`).expect(200);
 
     await http().get('/rooms?types=CASTLE').expect(400);
-    await http().get('/rooms?minPriceCents=-1').expect(400);
+    await http().get('/rooms?maxPriceCents=-1').expect(400);
     await http().get('/rooms?maxPriceCents=abc').expect(400);
-    await http()
-      .get('/rooms?minPriceCents=2000&maxPriceCents=1000')
-      .expect(400);
     await http().get('/rooms?audience=OTHER').expect(400);
   });
 
