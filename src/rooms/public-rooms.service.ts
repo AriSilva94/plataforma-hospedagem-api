@@ -1,4 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  availabilityWindowEnd,
+  isValidIsoDate,
+  todayInSaoPaulo,
+  weekdayOf,
+} from '../availability/availability-rules';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
@@ -119,6 +125,7 @@ function filterWhere({
   types,
   maxPriceCents,
   audience,
+  checkIn,
 }: Omit<ListPublicRoomsDto, 'cursor' | 'limit'>): Prisma.RoomWhereInput[] {
   return [
     city && state
@@ -127,7 +134,24 @@ function filterWhere({
     types?.length ? { property: { type: { in: types } } } : {},
     maxPriceCents === undefined ? {} : { priceCents: { lte: maxPriceCents } },
     audience ? { acceptedAudiences: { has: audience } } : {},
+    checkInWhere(checkIn),
   ];
+}
+
+function checkInWhere(checkIn: string | undefined): Prisma.RoomWhereInput {
+  const today = todayInSaoPaulo();
+  if (
+    !checkIn ||
+    !isValidIsoDate(checkIn) ||
+    checkIn < today ||
+    checkIn > availabilityWindowEnd(today)
+  ) {
+    return {};
+  }
+  return {
+    NOT: { blockedWeekdays: { has: weekdayOf(checkIn) } },
+    blockedDates: { none: { date: new Date(`${checkIn}T00:00:00Z`) } },
+  };
 }
 
 function canonicalCity(state: string, city: string): string {

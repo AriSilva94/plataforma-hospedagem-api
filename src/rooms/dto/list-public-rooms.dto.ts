@@ -67,4 +67,9 @@ export class ListPublicRoomsDto {
   @IsOptional()
   @IsIn(Object.values(GenderIdentity))
   audience?: GenderIdentity;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  checkIn?: string;
 }

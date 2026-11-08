@@ -1,6 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
+import {
+  todayInSaoPaulo,
+  weekdayOf,
+} from '../src/availability/availability-rules';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import {
   InMemoryMediaStorage,
@@ -745,6 +749,49 @@ describe('Imóveis e quartos (e2e)', () => {
     await http().get('/rooms?maxPriceCents=-1').expect(400);
     await http().get('/rooms?maxPriceCents=abc').expect(400);
     await http().get('/rooms?audience=OTHER').expect(400);
+  });
+
+  it('filtra por data de entrada e ignora data inválida', async () => {
+    const cookie = await account();
+    const filter = 'city=Pradópolis&state=SP&limit=48';
+    const addDays = (date: string, days: number): string => {
+      const result = new Date(`${date}T00:00:00Z`);
+      result.setUTCDate(result.getUTCDate() + days);
+      return result.toISOString().slice(0, 10);
+    };
+    const today = todayInSaoPaulo();
+    const blockedDate = addDays(today, 3);
+    const blockedWeekdayDate = addDays(today, 4);
+    const { roomId: dateRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Pradópolis', state: 'SP' },
+    });
+    const { roomId: weekdayRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Pradópolis', state: 'SP' },
+    });
+    await prisma.roomBlockedDate.create({
+      data: { roomId: dateRoom, date: new Date(`${blockedDate}T00:00:00Z`) },
+    });
+    await prisma.room.update({
+      where: { id: weekdayRoom },
+      data: { blockedWeekdays: [weekdayOf(blockedWeekdayDate)] },
+    });
+    const ids = async (path: string, checkIn: string) => {
+      const response = await http()
+        .get(`${path}?${filter}&checkIn=${checkIn}`)
+        .expect(200);
+      return (response.body as { items: { id: string }[] }).items
+        .map(({ id }) => id)
+        .sort();
+    };
+    const both = [dateRoom, weekdayRoom].sort();
+
+    expect(await ids('/rooms', blockedDate)).toEqual([weekdayRoom]);
+    expect(await ids('/rooms', blockedWeekdayDate)).toEqual([dateRoom]);
+    expect(await ids('/rooms/featured', blockedDate)).not.toContain(dateRoom);
+    expect(await ids('/rooms', '2026-13-40')).toEqual(both);
+    expect(await ids('/rooms', 'abc')).toEqual(both);
+    expect(await ids('/rooms', addDays(today, -1))).toEqual(both);
+    expect(await ids('/rooms', addDays(today, 800))).toEqual(both);
   });
 
   afterAll(async () => {
