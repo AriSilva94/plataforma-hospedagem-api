@@ -264,7 +264,8 @@ model Room {
   bathroomType               BathroomType           @map("bathroom_type")
   acceptedAudiences          GenderIdentity[]       @map("accepted_audiences")
   amenities                  String[]               @default([])
-  additionalInfo             String?                @map("additional_info")
+  blockedWeekdays            Int[]                  @default([]) @map("blocked_weekdays")
+  additionalInfo            String?                @map("additional_info")
   completenessScore          Int                    @default(0) @map("completeness_score")
   rankingScore               Int                    @default(0) @map("ranking_score")
   rankingVersion             Int                    @default(0) @map("ranking_version")
@@ -275,6 +276,7 @@ model Room {
   verificationRejectedReason String?                @map("verification_rejected_reason")
   media                      RoomMedia[]
   favorites                  Favorite[]
+  blockedDates               RoomBlockedDate[]
   createdAt                  DateTime               @default(now()) @map("created_at")
   updatedAt                  DateTime               @updatedAt @map("updated_at")
 
@@ -282,6 +284,15 @@ model Room {
   @@index([status, rankingScore(sort: Desc), id])
   @@index([featuredUntil])
   @@map("rooms")
+}
+
+model RoomBlockedDate {
+  roomId String   @map("room_id") @db.Uuid
+  room   Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  date   DateTime @db.Date
+
+  @@id([roomId, date])
+  @@map("room_blocked_dates")
 }
 
 model Favorite {

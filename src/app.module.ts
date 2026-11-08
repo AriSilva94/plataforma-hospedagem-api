@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import Redis from 'ioredis';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { AvailabilityModule } from './availability/availability.module';
 import { AppController } from './app.controller';
 import { FavoritesModule } from './favorites/favorites.module';
 import { LocationsModule } from './locations/locations.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     PropertiesModule,
     RoomsModule,
+    AvailabilityModule,
     AdminModule,
     FavoritesModule,
     LocationsModule,
