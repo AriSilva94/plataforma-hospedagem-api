@@ -265,7 +265,7 @@ model Room {
   acceptedAudiences          GenderIdentity[]       @map("accepted_audiences")
   amenities                  String[]               @default([])
   blockedWeekdays            Int[]                  @default([]) @map("blocked_weekdays")
-  additionalInfo            String?                @map("additional_info")
+  additionalInfo             String?                @map("additional_info")
   completenessScore          Int                    @default(0) @map("completeness_score")
   rankingScore               Int                    @default(0) @map("ranking_score")
   rankingVersion             Int                    @default(0) @map("ranking_version")
