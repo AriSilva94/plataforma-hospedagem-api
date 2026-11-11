@@ -1,6 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
+import {
+  todayInSaoPaulo,
+  weekdayOf,
+} from '../src/availability/availability-rules';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import {
   InMemoryMediaStorage,
@@ -693,18 +697,101 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(page.items.map(({ id }) => id)).toContain(roomId);
     expect(page.total).toBe(page.items.length);
 
-    const elsewhere = await http()
-      .get('/rooms?city=Ribeirão Preto&state=MG')
+    const withoutAccent = await http()
+      .get('/rooms?city=RIBEIRAO PRETO&state=SP&limit=48')
       .expect(200);
-    expect((elsewhere.body as Page).items.map(({ id }) => id)).not.toContain(
+    expect((withoutAccent.body as Page).items.map(({ id }) => id)).toContain(
       roomId,
     );
+
+    await http().get('/rooms?city=Ribeirão Preto&state=MG').expect(400);
+    await http().get('/rooms?city=Ribeir_o Preto&state=SP').expect(400);
+    await http().get('/rooms?city=%25&state=SP').expect(400);
     await http()
       .get('/rooms/featured?city=Ribeirão Preto&state=SP')
       .expect(200);
     await http().get('/rooms?city=Ribeirão Preto').expect(400);
     await http().get('/rooms?state=SP').expect(400);
     await http().get('/rooms?city=Ribeirão Preto&state=XX').expect(400);
+  });
+
+  it('filtra a listagem pública por tipo, preço e público aceito', async () => {
+    const cookie = await account();
+    const filter = 'city=Sertãozinho&state=SP&limit=48';
+    const { roomId: motelRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Sertãozinho', state: 'SP', type: 'MOTEL' },
+      room: { priceCents: 8000, acceptedAudiences: ['MAN', 'TRANS_MAN'] },
+    });
+    const { roomId: houseRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Sertãozinho', state: 'SP' },
+      room: { priceCents: 20000, acceptedAudiences: ['WOMAN'] },
+    });
+    const ids = async (query: string) => {
+      const response = await http()
+        .get(`/rooms?${filter}&${query}`)
+        .expect(200);
+      return (response.body as { items: { id: string }[] }).items
+        .map(({ id }) => id)
+        .sort();
+    };
+
+    expect(await ids('types=MOTEL')).toEqual([motelRoom]);
+    expect(await ids('types=HOUSE,APARTMENT')).toEqual([houseRoom]);
+    expect(await ids('maxPriceCents=8000')).toEqual([motelRoom]);
+    expect(await ids('maxPriceCents=20000')).toEqual(
+      [motelRoom, houseRoom].sort(),
+    );
+    expect(await ids('audience=TRANS_MAN')).toEqual([motelRoom]);
+    expect(await ids('audience=WOMAN&types=MOTEL')).toEqual([]);
+    await http().get(`/rooms/featured?${filter}&types=MOTEL`).expect(200);
+
+    await http().get('/rooms?types=CASTLE').expect(400);
+    await http().get('/rooms?maxPriceCents=-1').expect(400);
+    await http().get('/rooms?maxPriceCents=abc').expect(400);
+    await http().get('/rooms?audience=OTHER').expect(400);
+  });
+
+  it('filtra por data de entrada e ignora data inválida', async () => {
+    const cookie = await account();
+    const filter = 'city=Pradópolis&state=SP&limit=48';
+    const addDays = (date: string, days: number): string => {
+      const result = new Date(`${date}T00:00:00Z`);
+      result.setUTCDate(result.getUTCDate() + days);
+      return result.toISOString().slice(0, 10);
+    };
+    const today = todayInSaoPaulo();
+    const blockedDate = addDays(today, 3);
+    const blockedWeekdayDate = addDays(today, 4);
+    const { roomId: dateRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Pradópolis', state: 'SP' },
+    });
+    const { roomId: weekdayRoom } = await publishProperty(app, cookie, {
+      property: { city: 'Pradópolis', state: 'SP' },
+    });
+    await prisma.roomBlockedDate.create({
+      data: { roomId: dateRoom, date: new Date(`${blockedDate}T00:00:00Z`) },
+    });
+    await prisma.room.update({
+      where: { id: weekdayRoom },
+      data: { blockedWeekdays: [weekdayOf(blockedWeekdayDate)] },
+    });
+    const ids = async (path: string, checkIn: string) => {
+      const response = await http()
+        .get(`${path}?${filter}&checkIn=${checkIn}`)
+        .expect(200);
+      return (response.body as { items: { id: string }[] }).items
+        .map(({ id }) => id)
+        .sort();
+    };
+    const both = [dateRoom, weekdayRoom].sort();
+
+    expect(await ids('/rooms', blockedDate)).toEqual([weekdayRoom]);
+    expect(await ids('/rooms', blockedWeekdayDate)).toEqual([dateRoom]);
+    expect(await ids('/rooms/featured', blockedDate)).not.toContain(dateRoom);
+    expect(await ids('/rooms', '2026-13-40')).toEqual(both);
+    expect(await ids('/rooms', 'abc')).toEqual(both);
+    expect(await ids('/rooms', addDays(today, -1))).toEqual(both);
+    expect(await ids('/rooms', addDays(today, 800))).toEqual(both);
   });
 
   afterAll(async () => {

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -164,5 +165,29 @@ describe('UsersService', () => {
     await expect(service.getMe('missing-user')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('descarta a nova foto quando outra requisição trocou o avatar antes', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ avatarKey: 'old.webp' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const mediaService = {
+      store: jest.fn().mockResolvedValue({ storageKey: 'new.webp' }),
+      removeQuietly: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new UsersService(prisma as never, mediaService as never);
+
+    await expect(
+      service.uploadAvatar('user-a', { path: '/tmp/a', size: 1 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user-a', avatarKey: 'old.webp' },
+      data: { avatarKey: 'new.webp' },
+    });
+    expect(mediaService.removeQuietly).toHaveBeenCalledWith(['new.webp']);
+    expect(mediaService.removeQuietly).not.toHaveBeenCalledWith(['old.webp']);
   });
 });

@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -11,7 +13,11 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Trim } from '../../common/transforms';
+import { GenderIdentity, PropertyType } from '../../generated/prisma/client';
 import { BRAZILIAN_STATES } from '../../properties/property-catalog';
+import { MAX_PRICE_CENTS } from '../room-catalog';
+
+const PROPERTY_TYPES = Object.values(PropertyType);
 
 export class ListPublicRoomsDto {
   @IsOptional()
@@ -39,4 +45,31 @@ export class ListPublicRoomsDto {
   @ValidateIf((dto: ListPublicRoomsDto) => dto.city !== undefined)
   @IsIn(BRAZILIAN_STATES, { message: 'UF inválida.' })
   state?: string;
+
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string'
+      ? value.split(',').map((type) => type.trim())
+      : value,
+  )
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(PROPERTY_TYPES.length)
+  @IsIn(PROPERTY_TYPES, { each: true })
+  types?: PropertyType[];
+
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_PRICE_CENTS)
+  maxPriceCents?: number;
+
+  @IsOptional()
+  @IsIn(Object.values(GenderIdentity))
+  audience?: GenderIdentity;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  checkIn?: string;
 }

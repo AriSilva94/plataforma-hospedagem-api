@@ -1,7 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  availabilityWindowEnd,
+  isValidIsoDate,
+  todayInSaoPaulo,
+  weekdayOf,
+} from '../availability/availability-rules';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
+import { canonicalCityOfState } from '../locations/brazilian-cities';
 import { listedRoomWhere } from '../properties/public-listing';
 import { ListPublicRoomsDto } from './dto/list-public-rooms.dto';
 import {
@@ -42,7 +49,7 @@ export class PublicRoomsService {
   }
 
   private async paginate(
-    { cursor: encodedCursor, limit, city, state }: ListPublicRoomsDto,
+    { cursor: encodedCursor, limit, ...filters }: ListPublicRoomsDto,
     featured: boolean,
     featuringWhere: (now: Date) => Prisma.RoomWhereInput,
   ) {
@@ -52,12 +59,7 @@ export class PublicRoomsService {
     const asOf = cursor?.asOf ?? new Date();
     const startedAt = performance.now();
     const where: Prisma.RoomWhereInput = {
-      AND: [
-        featuringWhere(asOf),
-        city && state
-          ? { property: { state, city: { equals: city, mode: 'insensitive' } } }
-          : {},
-      ],
+      AND: [featuringWhere(asOf), ...filterWhere(filters)],
     };
 
     try {
@@ -82,7 +84,7 @@ export class PublicRoomsService {
           : null;
 
       this.logger.log(
-        `rooms.list featured=${featured} filtered=${Boolean(city)} durationMs=${elapsed(startedAt)} results=${page.length} firstPage=${!cursor}`,
+        `rooms.list featured=${featured} filtered=${Object.values(filters).some((value) => value !== undefined)} durationMs=${elapsed(startedAt)} results=${page.length} firstPage=${!cursor}`,
       );
 
       return {
@@ -115,6 +117,49 @@ export class PublicRoomsService {
       select: publicRoomCardSelect,
     });
   }
+}
+
+function filterWhere({
+  city,
+  state,
+  types,
+  maxPriceCents,
+  audience,
+  checkIn,
+}: Omit<ListPublicRoomsDto, 'cursor' | 'limit'>): Prisma.RoomWhereInput[] {
+  return [
+    city && state
+      ? { property: { state, city: canonicalCity(state, city) } }
+      : {},
+    types?.length ? { property: { type: { in: types } } } : {},
+    maxPriceCents === undefined ? {} : { priceCents: { lte: maxPriceCents } },
+    audience ? { acceptedAudiences: { has: audience } } : {},
+    checkInWhere(checkIn),
+  ];
+}
+
+function checkInWhere(checkIn: string | undefined): Prisma.RoomWhereInput {
+  const today = todayInSaoPaulo();
+  if (
+    !checkIn ||
+    !isValidIsoDate(checkIn) ||
+    checkIn < today ||
+    checkIn > availabilityWindowEnd(today)
+  ) {
+    return {};
+  }
+  return {
+    NOT: { blockedWeekdays: { has: weekdayOf(checkIn) } },
+    blockedDates: { none: { date: new Date(`${checkIn}T00:00:00Z`) } },
+  };
+}
+
+function canonicalCity(state: string, city: string): string {
+  const canonical = canonicalCityOfState(state, city);
+  if (!canonical) {
+    throw new BadRequestException('Cidade não encontrada na UF informada.');
+  }
+  return canonical;
 }
 
 function afterCursorWhere({

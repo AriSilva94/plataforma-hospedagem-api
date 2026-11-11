@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -23,6 +24,7 @@ import { UpdateGuestProfileDto } from './dto/update-guest-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 
 const EARLIEST_BIRTH_DATE = new Date('1900-01-01');
+const AVATAR_CACHE_CONTROL = 'public, max-age=300';
 const LISTING_PERSONAL_DATA_FIELDS: ListingPersonalDataField[] = [
   'phone',
   'birthDate',
@@ -110,6 +112,7 @@ export class UsersService {
       file,
       `users/${userId}`,
       [MediaType.IMAGE],
+      AVATAR_CACHE_CONTROL,
     );
     return this.replaceAvatar(userId, storageKey);
   }
@@ -126,10 +129,18 @@ export class UsersService {
     if (!previous) {
       throw new NotFoundException('Usuário não encontrado.');
     }
-    await this.prisma.user.update({
-      where: { id: userId },
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: userId, avatarKey: previous.avatarKey },
       data: { avatarKey },
     });
+    if (count === 0) {
+      if (avatarKey) {
+        await this.mediaService.removeQuietly([avatarKey]);
+      }
+      throw new ConflictException(
+        'A foto de perfil foi alterada em outra requisição. Tente novamente.',
+      );
+    }
     if (previous.avatarKey) {
       await this.mediaService.removeQuietly([previous.avatarKey]);
     }

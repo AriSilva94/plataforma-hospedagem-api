@@ -28,6 +28,16 @@ export function isCityOfState(state: string, city: string): boolean {
   return citiesByState.get(state)?.includes(city) ?? false;
 }
 
+export function canonicalCityOfState(
+  state: string,
+  city: string,
+): string | undefined {
+  const key = normalize(city.trim());
+  return searchableCities.find(
+    (candidate) => candidate.state === state && candidate.key === key,
+  )?.city;
+}
+
 export function searchCities(query: string): { city: string; state: string }[] {
   const term = normalize(query.trim());
   const rank = (key: string) =>

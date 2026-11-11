@@ -11,6 +11,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MAX_CLOCK_SKEW_MS = 60_000;
+const MAX_CURSOR_AGE_MS = 60 * 60_000;
 
 export function encodeRoomListingCursor(cursor: RoomListingCursor): string {
   return Buffer.from(
@@ -49,7 +50,9 @@ export function decodeRoomListingCursor(
   }
 
   return {
-    asOf: new Date(decoded[0] as number),
+    asOf: new Date(
+      Math.max(decoded[0] as number, now.getTime() - MAX_CURSOR_AGE_MS),
+    ),
     featured: decoded[1],
     rankingScore: decoded[2] as number,
     id: decoded[3],

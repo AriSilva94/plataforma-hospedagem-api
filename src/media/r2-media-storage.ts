@@ -17,7 +17,7 @@ export class R2MediaStorage extends MediaStorage implements OnModuleDestroy {
     super();
   }
 
-  async put({ key, body, contentType, sizeBytes }: MediaObject) {
+  async put({ key, body, contentType, sizeBytes, cacheControl }: MediaObject) {
     const { client, bucket } = this.connect();
     await client.send(
       new PutObjectCommand({
@@ -26,7 +26,7 @@ export class R2MediaStorage extends MediaStorage implements OnModuleDestroy {
         Body: body,
         ContentType: contentType,
         ContentLength: sizeBytes,
-        CacheControl: 'public, max-age=31536000, immutable',
+        CacheControl: cacheControl ?? 'public, max-age=31536000, immutable',
       }),
     );
   }
