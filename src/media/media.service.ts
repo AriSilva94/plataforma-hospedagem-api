@@ -39,6 +39,7 @@ export class MediaService {
     file: UploadedMediaFile | undefined,
     keyPrefix: string,
     allowedTypes: readonly MediaType[],
+    cacheControl?: string,
   ): Promise<StoredMedia> {
     const inspected = await inspectFile(file, allowedTypes);
     const { format } = inspected;
@@ -63,6 +64,7 @@ export class MediaService {
         : createReadStream(inspected.file.path),
       contentType: format.mimeType,
       sizeBytes: storedSize,
+      cacheControl,
     });
 
     return {

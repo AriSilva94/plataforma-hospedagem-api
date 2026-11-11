@@ -5,6 +5,7 @@ export type MediaObject = {
   body: Readable;
   contentType: string;
   sizeBytes: number;
+  cacheControl?: string;
 };
 
 export abstract class MediaStorage {
