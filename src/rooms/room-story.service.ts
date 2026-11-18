@@ -31,7 +31,7 @@ export class RoomStoryService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async listPublic() {
+  async listPublic(userId?: string) {
     const rooms = await this.prisma.room.findMany({
       where: {
         AND: [
@@ -48,12 +48,15 @@ export class RoomStoryService {
         priceCents: true,
         capacity: true,
         acceptedAudiences: true,
+        storyApprovedAt: true,
         property: {
           select: { id: true, neighborhood: true, city: true, state: true },
         },
         storyMedia: { orderBy: storyMediaOrder },
       },
     });
+
+    const viewed = await this.viewedKeys(userId, rooms);
 
     return {
       items: rooms.map((room) => ({
@@ -66,6 +69,7 @@ export class RoomStoryService {
         neighborhood: room.property.neighborhood,
         city: room.property.city,
         state: room.property.state,
+        viewed: viewed.has(viewKey(room.id, room.storyApprovedAt)),
         media: room.storyMedia.map((media) => ({
           id: media.id,
           type: media.type,
@@ -73,6 +77,28 @@ export class RoomStoryService {
         })),
       })),
     };
+  }
+
+  private async viewedKeys(
+    userId: string | undefined,
+    rooms: { id: string; storyApprovedAt: Date | null }[],
+  ) {
+    if (!userId || rooms.length === 0) {
+      return new Set<string>();
+    }
+    const views = await this.prisma.roomStoryView.findMany({
+      where: {
+        userId,
+        OR: rooms.map((room) => ({
+          roomId: room.id,
+          storyApprovedAt: room.storyApprovedAt as Date,
+        })),
+      },
+      select: { roomId: true, storyApprovedAt: true },
+    });
+    return new Set(
+      views.map((view) => viewKey(view.roomId, view.storyApprovedAt)),
+    );
   }
 
   async addMedia(
@@ -167,6 +193,10 @@ export class RoomStoryService {
       room.propertyId,
     );
   }
+}
+
+function viewKey(roomId: string, storyApprovedAt: Date | null) {
+  return `${roomId}:${storyApprovedAt?.getTime()}`;
 }
 
 function resubmit(transaction: Prisma.TransactionClient, roomId: string) {

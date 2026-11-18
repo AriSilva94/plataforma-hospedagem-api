@@ -9,7 +9,11 @@ import {
   publishProperty,
 } from './support/e2e';
 
-type StoryItem = { roomId: string; media: { type: string; url: string }[] };
+type StoryItem = {
+  roomId: string;
+  viewed: boolean;
+  media: { type: string; url: string }[];
+};
 
 const day = 24 * 60 * 60 * 1000;
 const mp4 = Buffer.concat([
@@ -41,10 +45,13 @@ describe('Story de destaque do quarto (e2e)', () => {
       .set('Cookie', cookie)
       .attach('file', file, name);
 
-  const stories = async () =>
-    (await http().get('/rooms/stories').expect(200)).body as {
-      items: StoryItem[];
-    };
+  const stories = async (cookie?: string) =>
+    (
+      await http()
+        .get('/rooms/stories')
+        .set('Cookie', cookie ?? '')
+        .expect(200)
+    ).body as { items: StoryItem[] };
 
   const feature = (admin: string, roomId: string) =>
     http()
@@ -55,6 +62,45 @@ describe('Story de destaque do quarto (e2e)', () => {
         featuredUntil: new Date(Date.now() + day).toISOString(),
       })
       .expect(200);
+
+  async function publicStory() {
+    const owner = await accounts.create();
+    const admin = await accounts.createAdmin();
+    const { roomId } = await publishProperty(app, owner.cookie);
+    await upload(owner.cookie, roomId, png, 'a.png').expect(201);
+    await feature(admin, roomId);
+    await http()
+      .put(`/admin/rooms/${roomId}/story/approved`)
+      .set('Cookie', admin)
+      .expect(200);
+    const { storyApprovedAt } = await prisma.room.findUniqueOrThrow({
+      where: { id: roomId },
+      select: { storyApprovedAt: true },
+    });
+    return {
+      owner,
+      admin,
+      roomId,
+      storyApprovedAt: storyApprovedAt as Date,
+    };
+  }
+
+  it('marca como visto só para o usuário que abriu o story', async () => {
+    const { roomId, storyApprovedAt } = await publicStory();
+    const guestA = await accounts.create(['GUEST']);
+    const guestB = await accounts.create(['GUEST']);
+    await prisma.roomStoryView.create({
+      data: { roomId, userId: guestA.id, storyApprovedAt },
+    });
+    const viewedBy = async (cookie?: string) =>
+      (await stories(cookie)).items.find((item) => item.roomId === roomId)
+        ?.viewed;
+
+    expect(await viewedBy(guestA.cookie)).toBe(true);
+    expect(await viewedBy(guestB.cookie)).toBe(false);
+    expect(await viewedBy()).toBe(false);
+    expect(await viewedBy('access_token=token-invalido')).toBe(false);
+  });
 
   it('limita a 3 mídias e aceita imagem e vídeo', async () => {
     const owner = await accounts.create();
