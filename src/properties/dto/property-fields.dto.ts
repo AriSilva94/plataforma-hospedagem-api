@@ -13,8 +13,9 @@ import {
 import { TrimEach, TrimToNull } from '../../common/transforms';
 import { BRAZILIAN_STATES, PROPERTY_FEATURES } from '../property-catalog';
 import { OptionalNonNull } from '../../common/validation';
+import { HouseServicesFieldsDto } from '../../common/house-services';
 
-export class PropertyFieldsDto {
+export class PropertyFieldsDto extends HouseServicesFieldsDto {
   @TrimToNull()
   @IsOptional()
   @IsString()

@@ -6,6 +6,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
+import { resolveHouseServices } from '../common/house-services';
 import { visiblePropertyWhere } from './public-listing';
 
 const mediaOrder: Prisma.PropertyMediaOrderByWithRelationInput[] = [
@@ -25,6 +26,9 @@ const publicDetailSelect = {
   city: true,
   state: true,
   referencePoints: true,
+  hasCleaner: true,
+  cleaningFrequency: true,
+  smokingPolicy: true,
   sharedAreas: {
     orderBy: { position: 'asc' },
     select: { type: true, label: true, description: true },
@@ -44,6 +48,9 @@ const publicDetailSelect = {
       acceptedAudiences: true,
       amenities: true,
       additionalInfo: true,
+      hasCleaner: true,
+      cleaningFrequency: true,
+      smokingPolicy: true,
       verificationStatus: true,
       media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
     },
@@ -74,6 +81,7 @@ export class PublicPropertiesService {
       media: property.media.map((item) => this.mediaService.toResponse(item)),
       rooms: property.rooms.map(({ verificationStatus, ...room }) => ({
         ...room,
+        ...resolveHouseServices(property, room),
         verified: verificationStatus === RoomVerificationStatus.VERIFIED,
         media: room.media.map((item) => this.mediaService.toResponse(item)),
       })),

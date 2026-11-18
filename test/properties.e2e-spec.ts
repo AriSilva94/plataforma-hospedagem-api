@@ -342,9 +342,12 @@ describe('Imóveis e quartos (e2e)', () => {
       400,
     );
     await http().post(path).set('Cookie', owner).expect(400);
-    await upload(owner, `/owner/rooms/${room.id}/media`, mp4, 'v.mp4').expect(
-      400,
-    );
+    const roomPath = `/owner/rooms/${room.id}/media`;
+    const roomVideo = await upload(owner, roomPath, mp4, 'v.mp4').expect(201);
+    expect(roomVideo.body).toMatchObject({ type: 'VIDEO' });
+    await upload(owner, roomPath, mp4, 'v2.mp4').expect(201);
+    await upload(owner, roomPath, mp4, 'v3.mp4').expect(201);
+    await upload(owner, roomPath, mp4, 'v4.mp4').expect(422);
 
     const video = await upload(owner, path, mp4, 'tour.mp4').expect(201);
     const image = await upload(owner, path, png, 'foto.png').expect(201);
@@ -792,6 +795,39 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(await ids('/rooms', 'abc')).toEqual(both);
     expect(await ids('/rooms', addDays(today, -1))).toEqual(both);
     expect(await ids('/rooms', addDays(today, 800))).toEqual(both);
+  });
+
+  it('valida faxina e política de fumantes, com o quarto herdando do imóvel', async () => {
+    const owner = await account();
+    const property = await createProperty(owner, {
+      hasCleaner: true,
+      cleaningFrequency: 'WEEKLY',
+      smokingPolicy: 'OUTDOOR_ONLY',
+    });
+    expect(property).toMatchObject({
+      hasCleaner: true,
+      cleaningFrequency: 'WEEKLY',
+      smokingPolicy: 'OUTDOOR_ONLY',
+    });
+
+    await http()
+      .post('/owner/properties')
+      .set('Cookie', owner)
+      .send({ title: 'Casa Central', type: 'HOUSE', hasCleaner: true })
+      .expect(400);
+
+    const withoutCleaner = await http()
+      .patch(`/owner/properties/${property.id}`)
+      .set('Cookie', owner)
+      .send({ hasCleaner: false, cleaningFrequency: 'DAILY' })
+      .expect(200);
+    expect(withoutCleaner.body).toMatchObject({
+      hasCleaner: false,
+      cleaningFrequency: null,
+    });
+
+    const room = await createRoom(owner, property.id);
+    expect(room).toMatchObject({ hasCleaner: null, smokingPolicy: null });
   });
 
   afterAll(async () => {

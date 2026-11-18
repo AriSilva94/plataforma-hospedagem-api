@@ -28,6 +28,7 @@ import {
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { withConsistentCleaning } from '../common/house-services';
 import { MAX_PROPERTY_IMAGES, MAX_PROPERTY_VIDEOS } from './property-catalog';
 import {
   missingPublishRequirements,
@@ -49,7 +50,6 @@ const propertyDetailInclude = {
     orderBy: { createdAt: 'asc' },
     include: {
       media: {
-        where: { type: MediaType.IMAGE },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
         take: 1,
       },
@@ -78,11 +78,7 @@ export class PropertiesService {
       where: { ownerProfile: { userId } },
       orderBy: { updatedAt: 'desc' },
       include: {
-        media: {
-          where: { type: MediaType.IMAGE },
-          orderBy: mediaOrder,
-          take: 1,
-        },
+        media: { orderBy: mediaOrder, take: 1 },
         rooms: { select: { status: true, priceCents: true } },
       },
     });
@@ -99,7 +95,7 @@ export class PropertiesService {
         neighborhood: property.neighborhood,
         city: property.city,
         state: property.state,
-        coverUrl: this.mediaService.coverUrl(property.media),
+        ...this.mediaService.cover(property.media),
         roomCount: property.rooms.length,
         availableRoomCount: availablePrices.length,
         minAvailablePriceCents:
@@ -128,7 +124,7 @@ export class PropertiesService {
     assertCityOfState(dto.state, dto.city);
 
     const property = await this.prisma.property.create({
-      data: { ...dto, ownerProfileId: ownerProfile.id },
+      data: { ...withConsistentCleaning(dto), ownerProfileId: ownerProfile.id },
       select: { id: true },
     });
     return this.get(userId, property.id);
@@ -151,7 +147,7 @@ export class PropertiesService {
       const property = await this.lockOwned(transaction, userId, propertyId);
       const { state, city } = await transaction.property.update({
         where: { id: propertyId },
-        data: dto,
+        data: withConsistentCleaning(dto),
         select: { state: true, city: true },
       });
       assertCityOfState(state, city);
@@ -478,7 +474,7 @@ export class PropertiesService {
             imageCount: propertyImageCount,
           },
         }).missing,
-        coverUrl: this.mediaService.coverUrl(roomMedia),
+        ...this.mediaService.cover(roomMedia),
         verificationStatus: room.verificationStatus,
         verificationRejectedReason: room.verificationRejectedReason,
       })),

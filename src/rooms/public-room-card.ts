@@ -1,12 +1,7 @@
-import {
-  MediaType,
-  Prisma,
-  RoomVerificationStatus,
-} from '../generated/prisma/client';
+import { Prisma, RoomVerificationStatus } from '../generated/prisma/client';
 import { MediaService } from '../media/media.service';
 
 const coverMedia = {
-  where: { type: MediaType.IMAGE },
   orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
   take: 1,
   select: { type: true, storageKey: true },
@@ -48,8 +43,7 @@ export function toPublicRoomCard(
     priceCents: room.priceCents,
     featured,
     verified: room.verificationStatus === RoomVerificationStatus.VERIFIED,
-    coverUrl:
-      mediaService.coverUrl(media) ?? mediaService.coverUrl(propertyMedia),
+    ...mediaService.cover(media, propertyMedia),
     property: propertySummary,
   };
 }
