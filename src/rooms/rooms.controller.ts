@@ -17,10 +17,11 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReorderMediaDto } from '../media/dto/reorder-media.dto';
 import type { UploadedMediaFile } from '../media/media.service';
-import { UploadImage } from '../media/upload-media.decorator';
+import { UploadImage, UploadStoryMedia } from '../media/upload-media.decorator';
 import { CurrentUser } from '../users/current-user.decorator';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
+import { RoomStoryService } from './room-story.service';
 import { RoomsService } from './rooms.service';
 
 type User = AuthenticatedRequest['user'];
@@ -28,7 +29,10 @@ type User = AuthenticatedRequest['user'];
 @Controller('owner')
 @UseGuards(JwtAuthGuard)
 export class RoomsController {
-  constructor(private readonly roomsService: RoomsService) {}
+  constructor(
+    private readonly roomsService: RoomsService,
+    private readonly roomStoryService: RoomStoryService,
+  ) {}
 
   @Post('properties/:propertyId/rooms')
   create(
@@ -98,5 +102,26 @@ export class RoomsController {
     @Param('mediaId', ParseUUIDPipe) mediaId: string,
   ) {
     return this.roomsService.removeMedia(user.id, roomId, mediaId);
+  }
+
+  @Post('rooms/:roomId/story/media')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UploadStoryMedia()
+  addStoryMedia(
+    @CurrentUser() user: User,
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @UploadedFile() file: UploadedMediaFile | undefined,
+  ) {
+    return this.roomStoryService.addMedia(user.id, roomId, file);
+  }
+
+  @Delete('rooms/:roomId/story/media/:mediaId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeStoryMedia(
+    @CurrentUser() user: User,
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+  ) {
+    return this.roomStoryService.removeMedia(user.id, roomId, mediaId);
   }
 }

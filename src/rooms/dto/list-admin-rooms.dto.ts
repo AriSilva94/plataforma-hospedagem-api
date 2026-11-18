@@ -1,10 +1,15 @@
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional } from 'class-validator';
-import { RoomVerificationStatus } from '../../generated/prisma/client';
+import {
+  RoomStoryStatus,
+  RoomVerificationStatus,
+} from '../../generated/prisma/client';
 import { SearchPageQueryDto } from '../../common/search-page-query.dto';
 import { FEATURING_STATUSES, type FeaturingStatus } from '../room-featuring';
 
 const ROOM_VERIFICATION_STATUSES = Object.values(RoomVerificationStatus);
+
+const ROOM_STORY_STATUSES = Object.values(RoomStoryStatus);
 
 export const ADMIN_ROOM_SORTS = ['name', 'completeness'] as const;
 
@@ -25,6 +30,10 @@ export class ListAdminRoomsDto extends SearchPageQueryDto {
   @IsOptional()
   @IsIn(ROOM_VERIFICATION_STATUSES)
   verificationStatus?: RoomVerificationStatus;
+
+  @IsOptional()
+  @IsIn(ROOM_STORY_STATUSES)
+  storyStatus?: RoomStoryStatus;
 
   @IsOptional()
   @IsIn(ADMIN_ROOM_SORTS)

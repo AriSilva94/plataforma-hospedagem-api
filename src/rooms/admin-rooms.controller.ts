@@ -13,6 +13,7 @@ import { AdminGuard } from '../auth/admin.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FeatureRoomDto } from './dto/feature-room.dto';
 import { ListAdminRoomsDto } from './dto/list-admin-rooms.dto';
+import { RejectRoomStoryDto } from './dto/reject-room-story.dto';
 import { RejectRoomVerificationDto } from './dto/reject-room-verification.dto';
 import { RoomFeaturingService } from './room-featuring.service';
 
@@ -59,6 +60,24 @@ export class AdminRoomsController {
     @Body() dto: RejectRoomVerificationDto,
   ) {
     return this.roomFeaturingService.reject(roomId, dto.reason);
+  }
+
+  @Put(':roomId/story/approved')
+  approveStory(@Param('roomId', ParseUUIDPipe) roomId: string) {
+    return this.roomFeaturingService.approveStory(roomId);
+  }
+
+  @Put(':roomId/story/rejected')
+  rejectStory(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Body() dto: RejectRoomStoryDto,
+  ) {
+    return this.roomFeaturingService.rejectStory(roomId, dto.reason);
+  }
+
+  @Delete(':roomId/story/review')
+  unreviewStory(@Param('roomId', ParseUUIDPipe) roomId: string) {
+    return this.roomFeaturingService.unreviewStory(roomId);
   }
 
   @Delete(':roomId/rejected')

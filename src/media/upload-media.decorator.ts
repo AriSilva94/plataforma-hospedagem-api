@@ -40,3 +40,4 @@ const uploadMedia = (fileSize: number) =>
 
 export const UploadImage = () => uploadMedia(MAX_IMAGE_BYTES);
 export const UploadPropertyMedia = () => uploadMedia(MAX_VIDEO_BYTES);
+export const UploadStoryMedia = () => uploadMedia(MAX_VIDEO_BYTES);
