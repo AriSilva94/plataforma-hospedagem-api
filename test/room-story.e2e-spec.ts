@@ -192,6 +192,85 @@ describe('Story de destaque do quarto (e2e)', () => {
     });
   });
 
+  describe('métricas do proprietário', () => {
+    const metrics = async (cookie: string, roomId: string) =>
+      (
+        (
+          await http()
+            .get(`/owner/rooms/${roomId}`)
+            .set('Cookie', cookie)
+            .expect(200)
+        ).body as { storyViews: { unique: number; total: number } }
+      ).storyViews;
+    const view = (roomId: string, cookie: string) =>
+      http()
+        .post(`/rooms/${roomId}/story/views`)
+        .set('Cookie', cookie)
+        .expect(204);
+
+    it('conta usuários distintos e total de aberturas sem identificar quem viu', async () => {
+      const { owner, roomId } = await publicStory();
+      const guestA = await accounts.create(['GUEST']);
+      const guestB = await accounts.create(['GUEST']);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+
+      await view(roomId, guestA.cookie);
+      await view(roomId, guestA.cookie);
+      await view(roomId, guestB.cookie);
+
+      const response = await http()
+        .get(`/owner/rooms/${roomId}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+      expect((response.body as { storyViews: unknown }).storyViews).toEqual({
+        unique: 2,
+        total: 3,
+      });
+      expect(JSON.stringify(response.body)).not.toContain(guestA.id);
+      expect(JSON.stringify(response.body)).not.toContain(guestB.id);
+    });
+
+    it('não conta a abertura do próprio proprietário', async () => {
+      const { owner, roomId } = await publicStory();
+
+      await view(roomId, owner.cookie);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+      expect(await prisma.roomStoryView.count({ where: { roomId } })).toBe(0);
+    });
+
+    it('zera as métricas quando o story é reaprovado', async () => {
+      const { owner, admin, roomId } = await publicStory();
+      const guest = await accounts.create(['GUEST']);
+      await view(roomId, guest.cookie);
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 1,
+        total: 1,
+      });
+
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { storyApprovedAt: new Date(Date.now() - 60_000) },
+      });
+      await http()
+        .put(`/admin/rooms/${roomId}/story/approved`)
+        .set('Cookie', admin)
+        .expect(200);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+    });
+  });
+
   it('limita a 3 mídias e aceita imagem e vídeo', async () => {
     const owner = await accounts.create();
     const { roomId } = await publishProperty(app, owner.cookie);

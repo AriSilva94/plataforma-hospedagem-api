@@ -90,10 +90,16 @@ export class RoomStoryService {
           activeStoryWhere(now),
         ],
       },
-      select: { storyApprovedAt: true },
+      select: {
+        storyApprovedAt: true,
+        property: { select: { ownerProfile: { select: { userId: true } } } },
+      },
     });
     if (!room?.storyApprovedAt) {
       throw new NotFoundException('Story não encontrado.');
+    }
+    if (room.property.ownerProfile.userId === userId) {
+      return;
     }
     const storyApprovedAt = room.storyApprovedAt;
 

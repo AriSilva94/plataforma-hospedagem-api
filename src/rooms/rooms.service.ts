@@ -122,7 +122,20 @@ export class RoomsService {
     return {
       ...this.toDetail(room),
       completenessMissing: await this.roomRanking.missingCompleteness(room.id),
+      storyViews: await this.storyViews(room),
     };
+  }
+
+  private async storyViews(room: { id: string; storyApprovedAt: Date | null }) {
+    if (!room.storyApprovedAt) {
+      return { unique: 0, total: 0 };
+    }
+    const totals = await this.prisma.roomStoryView.aggregate({
+      where: { roomId: room.id, storyApprovedAt: room.storyApprovedAt },
+      _count: { _all: true },
+      _sum: { viewCount: true },
+    });
+    return { unique: totals._count._all, total: totals._sum.viewCount ?? 0 };
   }
 
   async update(userId: string, roomId: string, dto: UpdateRoomDto) {
