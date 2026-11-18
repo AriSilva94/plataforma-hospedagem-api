@@ -377,6 +377,7 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
 
     expect(Object.keys(item).sort()).toEqual(
       [
+        'coverType',
         'coverUrl',
         'featured',
         'id',
