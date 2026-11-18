@@ -190,6 +190,21 @@ enum RoomStoryStatus {
   REJECTED
 }
 
+enum CleaningFrequency {
+  DAILY
+  SEVERAL_TIMES_WEEK
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  ON_DEMAND
+}
+
+enum SmokingPolicy {
+  NOT_ALLOWED
+  OUTDOOR_ONLY
+  ALLOWED
+}
+
 enum BathroomType {
   PRIVATE
   SHARED
@@ -219,6 +234,9 @@ model Property {
   city            String?
   state           String?              @db.Char(2)
   referencePoints String[]             @default([]) @map("reference_points")
+  hasCleaner        Boolean?           @map("has_cleaner")
+  cleaningFrequency CleaningFrequency? @map("cleaning_frequency")
+  smokingPolicy     SmokingPolicy?     @map("smoking_policy")
   sharedAreas     PropertySharedArea[]
   media           PropertyMedia[]
   rooms           Room[]
@@ -272,6 +290,9 @@ model Room {
   amenities                  String[]               @default([])
   blockedWeekdays            Int[]                  @default([]) @map("blocked_weekdays")
   additionalInfo             String?                @map("additional_info")
+  hasCleaner                 Boolean?               @map("has_cleaner")
+  cleaningFrequency          CleaningFrequency?     @map("cleaning_frequency")
+  smokingPolicy              SmokingPolicy?         @map("smoking_policy")
   completenessScore          Int                    @default(0) @map("completeness_score")
   rankingScore               Int                    @default(0) @map("ranking_score")
   rankingVersion             Int                    @default(0) @map("ranking_version")

@@ -9,8 +9,9 @@ import {
 import { TrimToNull } from '../../common/transforms';
 import { ROOM_AMENITIES } from '../room-catalog';
 import { OptionalNonNull } from '../../common/validation';
+import { HouseServicesFieldsDto } from '../../common/house-services';
 
-export class RoomFieldsDto {
+export class RoomFieldsDto extends HouseServicesFieldsDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
