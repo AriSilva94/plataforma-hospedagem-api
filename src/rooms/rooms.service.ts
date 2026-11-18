@@ -22,6 +22,7 @@ import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { withConsistentCleaning } from '../common/house-services';
 import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS } from './room-catalog';
+import { storyExpiresAt } from './room-story';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -291,6 +292,7 @@ export class RoomsService {
     const { _count, ...propertySummary } = property;
     return {
       ...room,
+      storyExpiresAt: storyExpiresAt(room),
       property: { ...propertySummary, availableRoomCount: _count.rooms },
       media: media.map((item) => this.mediaService.toResponse(item)),
       storyMedia: storyMedia.map((item) => this.mediaService.toResponse(item)),

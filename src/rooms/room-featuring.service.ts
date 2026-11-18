@@ -13,6 +13,7 @@ import { MediaService } from '../media/media.service';
 import { listedRoomWhere } from '../properties/public-listing';
 import { AdminRoomSort, ListAdminRoomsDto } from './dto/list-admin-rooms.dto';
 import { featuringStatusOf, featuringStatusWhere } from './room-featuring';
+import { storyExpiresAt } from './room-story';
 
 const adminRoomSelect = {
   id: true,
@@ -25,6 +26,7 @@ const adminRoomSelect = {
   verificationRejectedReason: true,
   storyStatus: true,
   storyRejectedReason: true,
+  storyApprovedAt: true,
   storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
     select: { id: true, title: true, status: true, city: true, state: true },
@@ -183,7 +185,12 @@ export class RoomFeaturingService {
   ) {
     const { count } = await this.prisma.room.updateMany({
       where: { id: roomId, storyMedia: { some: {} } },
-      data: { storyStatus, storyRejectedReason },
+      data: {
+        storyStatus,
+        storyRejectedReason,
+        storyApprovedAt:
+          storyStatus === RoomStoryStatus.APPROVED ? new Date() : null,
+      },
     });
     if (count === 0) {
       throw new NotFoundException('Quarto sem story para analisar.');
@@ -236,6 +243,7 @@ export class RoomFeaturingService {
   ) {
     return {
       ...room,
+      storyExpiresAt: storyExpiresAt(room),
       storyMedia: storyMedia.map((media) =>
         this.mediaService.toResponse(media),
       ),

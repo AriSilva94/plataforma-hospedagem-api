@@ -14,6 +14,7 @@ import { listedRoomWhere } from '../properties/public-listing';
 import { PropertiesService } from '../properties/properties.service';
 import { MAX_ROOM_STORY_MEDIA } from './room-catalog';
 import { activeFeaturingWhere } from './room-featuring';
+import { activeStoryWhere } from './room-story';
 
 const PUBLIC_STORIES_LIMIT = 20;
 
@@ -36,7 +37,7 @@ export class RoomStoryService {
         AND: [
           listedRoomWhere,
           activeFeaturingWhere(new Date()),
-          { storyStatus: RoomStoryStatus.APPROVED, storyMedia: { some: {} } },
+          activeStoryWhere(new Date()),
         ],
       },
       orderBy: [{ rankingScore: 'desc' }, { id: 'asc' }],
@@ -174,6 +175,7 @@ function resubmit(transaction: Prisma.TransactionClient, roomId: string) {
     data: {
       storyStatus: RoomStoryStatus.PENDING,
       storyRejectedReason: null,
+      storyApprovedAt: null,
     },
   });
 }
