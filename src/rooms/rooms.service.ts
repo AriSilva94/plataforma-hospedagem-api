@@ -26,6 +26,7 @@ type Transaction = Prisma.TransactionClient;
 
 const roomDetailInclude = {
   media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+  storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
     select: {
       id: true,
@@ -268,12 +269,13 @@ export class RoomsService {
     );
   }
 
-  private toDetail({ media, property, ...room }: RoomDetail) {
+  private toDetail({ media, storyMedia, property, ...room }: RoomDetail) {
     const { _count, ...propertySummary } = property;
     return {
       ...room,
       property: { ...propertySummary, availableRoomCount: _count.rooms },
       media: media.map((item) => this.mediaService.toResponse(item)),
+      storyMedia: storyMedia.map((item) => this.mediaService.toResponse(item)),
     };
   }
 }

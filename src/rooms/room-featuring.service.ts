@@ -3,8 +3,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma, RoomVerificationStatus } from '../generated/prisma/client';
+import {
+  Prisma,
+  RoomStoryStatus,
+  RoomVerificationStatus,
+} from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
+import { MediaService } from '../media/media.service';
 import { listedRoomWhere } from '../properties/public-listing';
 import { AdminRoomSort, ListAdminRoomsDto } from './dto/list-admin-rooms.dto';
 import { featuringStatusOf, featuringStatusWhere } from './room-featuring';
@@ -18,6 +23,9 @@ const adminRoomSelect = {
   featuredUntil: true,
   verificationStatus: true,
   verificationRejectedReason: true,
+  storyStatus: true,
+  storyRejectedReason: true,
+  storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
     select: { id: true, title: true, status: true, city: true, state: true },
   },
@@ -37,13 +45,17 @@ type AdminRoomRow = Prisma.RoomGetPayload<{
 
 @Injectable()
 export class RoomFeaturingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mediaService: MediaService,
+  ) {}
 
   async list({
     q,
     featuring,
     listed,
     verificationStatus,
+    storyStatus,
     sort,
     page,
     limit,
@@ -67,6 +79,9 @@ export class RoomFeaturingService {
             ? listedRoomWhere
             : { NOT: listedRoomWhere },
         verificationStatus === undefined ? {} : { verificationStatus },
+        storyStatus === undefined
+          ? {}
+          : { storyStatus, storyMedia: { some: {} } },
       ],
     };
     const [rooms, total] = await Promise.all([
@@ -82,7 +97,7 @@ export class RoomFeaturingService {
     const listedIds = await this.listedIds(rooms.map((room) => room.id));
 
     return {
-      items: rooms.map((room) => toAdminRoom(room, listedIds, now)),
+      items: rooms.map((room) => this.toAdminRoom(room, listedIds, now)),
       page,
       limit,
       total,
@@ -149,6 +164,33 @@ export class RoomFeaturingService {
     );
   }
 
+  approveStory(roomId: string) {
+    return this.setStoryStatus(roomId, RoomStoryStatus.APPROVED);
+  }
+
+  rejectStory(roomId: string, reason: string) {
+    return this.setStoryStatus(roomId, RoomStoryStatus.REJECTED, reason);
+  }
+
+  unreviewStory(roomId: string) {
+    return this.setStoryStatus(roomId, RoomStoryStatus.PENDING);
+  }
+
+  private async setStoryStatus(
+    roomId: string,
+    storyStatus: RoomStoryStatus,
+    storyRejectedReason: string | null = null,
+  ) {
+    const { count } = await this.prisma.room.updateMany({
+      where: { id: roomId, storyMedia: { some: {} } },
+      data: { storyStatus, storyRejectedReason },
+    });
+    if (count === 0) {
+      throw new NotFoundException('Quarto sem story para analisar.');
+    }
+    return this.get(roomId);
+  }
+
   private async setVerification(
     roomId: string,
     verificationStatus: RoomVerificationStatus,
@@ -173,7 +215,7 @@ export class RoomFeaturingService {
     if (!room) {
       throw roomNotFound();
     }
-    return toAdminRoom(room, await this.listedIds([room.id]), new Date());
+    return this.toAdminRoom(room, await this.listedIds([room.id]), new Date());
   }
 
   private async listedIds(ids: string[]): Promise<Set<string>> {
@@ -186,14 +228,21 @@ export class RoomFeaturingService {
     });
     return new Set(listed.map((room) => room.id));
   }
-}
 
-function toAdminRoom(room: AdminRoomRow, listed: Set<string>, now: Date) {
-  return {
-    ...room,
-    listed: listed.has(room.id),
-    featuringStatus: featuringStatusOf(room, now),
-  };
+  private toAdminRoom(
+    { storyMedia, ...room }: AdminRoomRow,
+    listed: Set<string>,
+    now: Date,
+  ) {
+    return {
+      ...room,
+      storyMedia: storyMedia.map((media) =>
+        this.mediaService.toResponse(media),
+      ),
+      listed: listed.has(room.id),
+      featuringStatus: featuringStatusOf(room, now),
+    };
+  }
 }
 
 function roomNotFound() {
