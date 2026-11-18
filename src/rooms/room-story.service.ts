@@ -79,6 +79,33 @@ export class RoomStoryService {
     };
   }
 
+  async recordView(userId: string, roomId: string): Promise<void> {
+    const now = new Date();
+    const room = await this.prisma.room.findFirst({
+      where: {
+        AND: [
+          { id: roomId },
+          listedRoomWhere,
+          activeFeaturingWhere(now),
+          activeStoryWhere(now),
+        ],
+      },
+      select: { storyApprovedAt: true },
+    });
+    if (!room?.storyApprovedAt) {
+      throw new NotFoundException('Story não encontrado.');
+    }
+    const storyApprovedAt = room.storyApprovedAt;
+
+    await this.prisma.roomStoryView.upsert({
+      where: {
+        roomId_userId_storyApprovedAt: { roomId, userId, storyApprovedAt },
+      },
+      create: { roomId, userId, storyApprovedAt },
+      update: { viewCount: { increment: 1 }, lastViewedAt: now },
+    });
+  }
+
   private async viewedKeys(
     userId: string | undefined,
     rooms: { id: string; storyApprovedAt: Date | null }[],
