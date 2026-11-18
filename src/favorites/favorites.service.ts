@@ -1,11 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { MediaType, Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
 import { listedRoomWhere } from '../properties/public-listing';
 
 const coverMedia = {
-  where: { type: MediaType.IMAGE },
   orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
   take: 1,
   select: { type: true, storageKey: true },
@@ -103,9 +102,7 @@ export class FavoritesService {
       roomId: room.id,
       title: room.title,
       priceCents: room.priceCents,
-      coverUrl:
-        this.mediaService.coverUrl(room.media) ??
-        this.mediaService.coverUrl(propertyMedia),
+      ...this.mediaService.cover(room.media, propertyMedia),
       available,
       favoritedAt: createdAt,
       property,

@@ -197,13 +197,22 @@ describe('MediaService', () => {
     ).toThrow(BadRequestException);
   });
 
-  it('usa a primeira imagem como capa, ignorando vídeos', () => {
+  it('usa a primeira mídia como capa, seja imagem ou vídeo, com fallback', () => {
     expect(
-      service.coverUrl([
+      service.cover([
         { type: MediaType.VIDEO, storageKey: 'v.mp4' },
         { type: MediaType.IMAGE, storageKey: 'i.png' },
       ]),
-    ).toBe('https://cdn.test/i.png');
-    expect(service.coverUrl([])).toBeNull();
+    ).toEqual({
+      coverUrl: 'https://cdn.test/v.mp4',
+      coverType: MediaType.VIDEO,
+    });
+    expect(
+      service.cover([], [{ type: MediaType.IMAGE, storageKey: 'i.png' }]),
+    ).toEqual({
+      coverUrl: 'https://cdn.test/i.png',
+      coverType: MediaType.IMAGE,
+    });
+    expect(service.cover([])).toEqual({ coverUrl: null, coverType: null });
   });
 });

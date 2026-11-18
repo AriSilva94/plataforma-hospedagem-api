@@ -184,6 +184,27 @@ enum RoomVerificationStatus {
   REJECTED
 }
 
+enum RoomStoryStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CleaningFrequency {
+  DAILY
+  SEVERAL_TIMES_WEEK
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  ON_DEMAND
+}
+
+enum SmokingPolicy {
+  NOT_ALLOWED
+  OUTDOOR_ONLY
+  ALLOWED
+}
+
 enum BathroomType {
   PRIVATE
   SHARED
@@ -213,6 +234,9 @@ model Property {
   city            String?
   state           String?              @db.Char(2)
   referencePoints String[]             @default([]) @map("reference_points")
+  hasCleaner        Boolean?           @map("has_cleaner")
+  cleaningFrequency CleaningFrequency? @map("cleaning_frequency")
+  smokingPolicy     SmokingPolicy?     @map("smoking_policy")
   sharedAreas     PropertySharedArea[]
   media           PropertyMedia[]
   rooms           Room[]
@@ -266,6 +290,9 @@ model Room {
   amenities                  String[]               @default([])
   blockedWeekdays            Int[]                  @default([]) @map("blocked_weekdays")
   additionalInfo             String?                @map("additional_info")
+  hasCleaner                 Boolean?               @map("has_cleaner")
+  cleaningFrequency          CleaningFrequency?     @map("cleaning_frequency")
+  smokingPolicy              SmokingPolicy?         @map("smoking_policy")
   completenessScore          Int                    @default(0) @map("completeness_score")
   rankingScore               Int                    @default(0) @map("ranking_score")
   rankingVersion             Int                    @default(0) @map("ranking_version")
@@ -274,7 +301,10 @@ model Room {
   featuredUntil              DateTime?              @map("featured_until")
   verificationStatus         RoomVerificationStatus @default(PENDING) @map("verification_status")
   verificationRejectedReason String?                @map("verification_rejected_reason")
+  storyStatus                RoomStoryStatus        @default(PENDING) @map("story_status")
+  storyRejectedReason        String?                @map("story_rejected_reason")
   media                      RoomMedia[]
+  storyMedia                 RoomStoryMedia[]
   favorites                  Favorite[]
   blockedDates               RoomBlockedDate[]
   createdAt                  DateTime               @default(now()) @map("created_at")
@@ -284,6 +314,21 @@ model Room {
   @@index([status, rankingScore(sort: Desc), id])
   @@index([featuredUntil])
   @@map("rooms")
+}
+
+model RoomStoryMedia {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId     String    @map("room_id") @db.Uuid
+  room       Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type       MediaType
+  storageKey String    @unique @map("storage_key")
+  mimeType   String    @map("mime_type")
+  sizeBytes  Int       @map("size_bytes")
+  position   Int
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([roomId, position])
+  @@map("room_story_media")
 }
 
 model RoomBlockedDate {

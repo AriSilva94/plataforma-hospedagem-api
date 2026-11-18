@@ -111,9 +111,15 @@ export class MediaService {
     };
   }
 
-  coverUrl(media: Pick<MediaRecord, 'type' | 'storageKey'>[]): string | null {
-    const cover = media.find((item) => item.type === MediaType.IMAGE);
-    return this.publicUrl(cover?.storageKey ?? null);
+  cover(...galleries: Pick<MediaRecord, 'type' | 'storageKey'>[][]): {
+    coverUrl: string | null;
+    coverType: MediaType | null;
+  } {
+    const cover = galleries.map((media) => media[0]).find(Boolean);
+    return {
+      coverUrl: this.publicUrl(cover?.storageKey ?? null),
+      coverType: cover?.type ?? null,
+    };
   }
 
   publicUrl(storageKey: string | null): string | null {

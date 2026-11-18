@@ -8,11 +8,17 @@ import { PublicRoomsController } from './public-rooms.controller';
 import { PublicRoomsService } from './public-rooms.service';
 import { RoomFeaturingService } from './room-featuring.service';
 import { RoomsController } from './rooms.controller';
+import { RoomStoryService } from './room-story.service';
 import { RoomsService } from './rooms.service';
 
 @Module({
   imports: [AuthModule, MediaModule, PropertiesModule, RankingModule],
   controllers: [RoomsController, PublicRoomsController, AdminRoomsController],
-  providers: [RoomsService, PublicRoomsService, RoomFeaturingService],
+  providers: [
+    RoomsService,
+    PublicRoomsService,
+    RoomFeaturingService,
+    RoomStoryService,
+  ],
 })
 export class RoomsModule {}

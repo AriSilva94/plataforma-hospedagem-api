@@ -20,17 +20,22 @@ import { PropertiesService } from '../properties/properties.service';
 import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
-import { MAX_ROOM_IMAGES } from './room-catalog';
+import { withConsistentCleaning } from '../common/house-services';
+import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS } from './room-catalog';
 
 type Transaction = Prisma.TransactionClient;
 
 const roomDetailInclude = {
   media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+  storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
     select: {
       id: true,
       title: true,
       status: true,
+      hasCleaner: true,
+      cleaningFrequency: true,
+      smokingPolicy: true,
       _count: {
         select: { rooms: { where: { status: RoomStatus.AVAILABLE } } },
       },
@@ -95,7 +100,7 @@ export class RoomsService {
     const room = await this.prisma.$transaction(async (transaction) => {
       await this.propertiesService.lockOwned(transaction, userId, propertyId);
       const created = await transaction.room.create({
-        data: { ...dto, propertyId },
+        data: { ...withConsistentCleaning(dto), propertyId },
         select: { id: true },
       });
       await this.roomRanking.recalculateRoom(transaction, created.id);
@@ -126,7 +131,10 @@ export class RoomsService {
         userId,
         roomId,
       );
-      await transaction.room.update({ where: { id: roomId }, data: dto });
+      await transaction.room.update({
+        where: { id: roomId },
+        data: withConsistentCleaning(dto),
+      });
       await this.propertiesService.assertListedComplete(transaction, property);
       await this.roomRanking.recalculateRoom(transaction, roomId);
     });
@@ -157,16 +165,17 @@ export class RoomsService {
     file: UploadedMediaFile | undefined,
   ) {
     await this.findOwnedRoom(this.prisma, userId, roomId);
+    const mediaType = await this.mediaService.typeOf(file, [
+      MediaType.IMAGE,
+      MediaType.VIDEO,
+    ]);
     const currentCount = await this.prisma.roomMedia.count({
-      where: { roomId },
+      where: { roomId, type: mediaType },
     });
-    if (currentCount >= MAX_ROOM_IMAGES) {
-      throw new UnprocessableEntityException(
-        `O quarto pode ter no máximo ${MAX_ROOM_IMAGES} fotos.`,
-      );
-    }
+    this.assertRoomMediaLimit(mediaType, currentCount);
     const stored = await this.mediaService.store(file, `rooms/${roomId}`, [
       MediaType.IMAGE,
+      MediaType.VIDEO,
     ]);
 
     try {
@@ -174,13 +183,12 @@ export class RoomsService {
         await this.lockOwnedRoomProperty(transaction, userId, roomId);
         const existing = await transaction.roomMedia.findMany({
           where: { roomId },
-          select: { position: true },
+          select: { type: true, position: true },
         });
-        if (existing.length >= MAX_ROOM_IMAGES) {
-          throw new UnprocessableEntityException(
-            `O quarto pode ter no máximo ${MAX_ROOM_IMAGES} fotos.`,
-          );
-        }
+        this.assertRoomMediaLimit(
+          stored.type,
+          existing.filter((item) => item.type === stored.type).length,
+        );
         const created = await transaction.roomMedia.create({
           data: { ...stored, roomId, position: nextPosition(existing) },
         });
@@ -240,6 +248,17 @@ export class RoomsService {
     await this.mediaService.removeQuietly([storageKey]);
   }
 
+  private assertRoomMediaLimit(type: MediaType, count: number) {
+    const limit = type === MediaType.IMAGE ? MAX_ROOM_IMAGES : MAX_ROOM_VIDEOS;
+    if (count >= limit) {
+      throw new UnprocessableEntityException(
+        type === MediaType.IMAGE
+          ? `O quarto pode ter no máximo ${limit} fotos.`
+          : `O quarto pode ter no máximo ${limit} vídeos.`,
+      );
+    }
+  }
+
   private async findOwnedRoom(
     transaction: Transaction,
     userId: string,
@@ -268,12 +287,13 @@ export class RoomsService {
     );
   }
 
-  private toDetail({ media, property, ...room }: RoomDetail) {
+  private toDetail({ media, storyMedia, property, ...room }: RoomDetail) {
     const { _count, ...propertySummary } = property;
     return {
       ...room,
       property: { ...propertySummary, availableRoomCount: _count.rooms },
       media: media.map((item) => this.mediaService.toResponse(item)),
+      storyMedia: storyMedia.map((item) => this.mediaService.toResponse(item)),
     };
   }
 }

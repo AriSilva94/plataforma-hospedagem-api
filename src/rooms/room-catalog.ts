@@ -16,5 +16,7 @@ export const ROOM_AMENITIES = [
 ] as const;
 
 export const MAX_ROOM_IMAGES = 20;
+export const MAX_ROOM_VIDEOS = 3;
+export const MAX_ROOM_STORY_MEDIA = 3;
 export const MAX_ROOM_CAPACITY = 20;
 export const MAX_PRICE_CENTS = 10_000_000;
