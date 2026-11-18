@@ -44,6 +44,7 @@ model User {
   passwordResetTokens    PasswordResetToken[]
   emailVerificationToken EmailVerificationToken?
   favorites              Favorite[]
+  storyViews             RoomStoryView[]
   avatarKey              String?                 @map("avatar_key")
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
@@ -303,8 +304,10 @@ model Room {
   verificationRejectedReason String?                @map("verification_rejected_reason")
   storyStatus                RoomStoryStatus        @default(PENDING) @map("story_status")
   storyRejectedReason        String?                @map("story_rejected_reason")
+  storyApprovedAt            DateTime?              @map("story_approved_at")
   media                      RoomMedia[]
   storyMedia                 RoomStoryMedia[]
+  storyViews                 RoomStoryView[]
   favorites                  Favorite[]
   blockedDates               RoomBlockedDate[]
   createdAt                  DateTime               @default(now()) @map("created_at")
@@ -366,4 +369,20 @@ model RoomMedia {
 
   @@index([roomId, position])
   @@map("room_media")
+}
+
+model RoomStoryView {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId          String   @map("room_id") @db.Uuid
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId          String   @map("user_id") @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storyApprovedAt DateTime @map("story_approved_at")
+  viewCount       Int      @default(1) @map("view_count")
+  firstViewedAt   DateTime @default(now()) @map("first_viewed_at")
+  lastViewedAt    DateTime @default(now()) @map("last_viewed_at")
+
+  @@unique([roomId, userId, storyApprovedAt])
+  @@index([userId])
+  @@map("room_story_views")
 }
