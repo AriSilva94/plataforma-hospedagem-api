@@ -19,6 +19,8 @@ type RoomPage = { items: ListedRoom[]; nextCursor: string | null };
 
 const day = 24 * 60 * 60 * 1000;
 const propertyTitle = 'Casa Ranking';
+const rankingCity = { city: 'Jaboticabal', state: 'SP' };
+const cityFilter = `city=${rankingCity.city}&state=${rankingCity.state}`;
 
 describe('Ranking, completude e destaque de quartos (e2e)', () => {
   let app: INestApplication<App>;
@@ -34,7 +36,10 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
   const account = () => accounts.create();
   const admin = () => accounts.createAdmin();
   const publishedRoom = (cookie: string, room: Body = {}) =>
-    publishProperty(app, cookie, { property: { title: propertyTitle }, room });
+    publishProperty(app, cookie, {
+      property: { title: propertyTitle, ...rankingCity },
+      room,
+    });
 
   function storedRanking(roomId: string) {
     return prisma.room.findUniqueOrThrow({
@@ -56,8 +61,8 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     let cursor: string | null = null;
     for (let page = 0; page < 1000; page++) {
       const query: string = cursor
-        ? `${path}?limit=${limit}&cursor=${cursor}`
-        : `${path}?limit=${limit}`;
+        ? `${path}?${cityFilter}&limit=${limit}&cursor=${cursor}`
+        : `${path}?${cityFilter}&limit=${limit}`;
       const response = await http().get(query).expect(200);
       const body = response.body as RoomPage;
       items.push(...body.items);
@@ -303,8 +308,8 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     let expired = false;
     for (let page = 0; page < 1000; page++) {
       const query: string = cursor
-        ? `/rooms/featured?limit=1&cursor=${cursor}`
-        : '/rooms/featured?limit=1';
+        ? `/rooms/featured?${cityFilter}&limit=1&cursor=${cursor}`
+        : `/rooms/featured?${cityFilter}&limit=1`;
       const body = (await http().get(query).expect(200)).body as RoomPage;
       seen.push(...body.items);
       if (!expired && body.items.some((item) => item.id === expiring.roomId)) {
@@ -392,8 +397,7 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
       title: propertyTitle,
       type: 'HOUSE',
       neighborhood: publishableAddress.neighborhood,
-      city: publishableAddress.city,
-      state: publishableAddress.state,
+      ...rankingCity,
     });
     expect(item.coverUrl).toMatch(
       /^https:\/\/media\.test\/assets\/images\/properties\//,
