@@ -10,11 +10,11 @@ import {
   availabilityWindowEnd,
   isValidIsoDate,
   normalizeAvailability,
+  toDbDate,
   todayInSaoPaulo,
 } from './availability-rules';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 
-const toDate = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
 const toIsoDate = (value: Date): string => value.toISOString().slice(0, 10);
 
 @Injectable()
@@ -51,10 +51,10 @@ export class AvailabilityService {
         throw roomNotFound();
       }
       await transaction.roomBlockedDate.deleteMany({
-        where: { roomId, date: { gte: toDate(today) } },
+        where: { roomId, date: { gte: toDbDate(today) } },
       });
       await transaction.roomBlockedDate.createMany({
-        data: blockedDates.map((date) => ({ roomId, date: toDate(date) })),
+        data: blockedDates.map((date) => ({ roomId, date: toDbDate(date) })),
       });
     });
     return this.ownerGet(userId, roomId);
@@ -71,7 +71,7 @@ export class AvailabilityService {
       select: {
         blockedWeekdays: true,
         blockedDates: {
-          where: { date: { gte: toDate(today) } },
+          where: { date: { gte: toDbDate(today) } },
           orderBy: { date: 'asc' },
           select: { date: true },
         },

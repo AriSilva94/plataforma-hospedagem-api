@@ -8,6 +8,28 @@ import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
 import { resolveHouseServices } from '../common/house-services';
 import { visiblePropertyWhere } from './public-listing';
+import {
+  availabilityWindowEnd,
+  isRangeFree,
+  isValidIsoDate,
+  toDbDate,
+  todayInSaoPaulo,
+} from '../availability/availability-rules';
+import { PublicPropertyQueryDto } from './dto/public-property-query.dto';
+
+type Period = { checkIn: string; checkOut: string };
+
+const consultedPeriod = ({
+  checkIn,
+  checkOut = checkIn,
+}: PublicPropertyQueryDto): Period | null =>
+  checkIn &&
+  checkOut &&
+  isValidIsoDate(checkIn) &&
+  isValidIsoDate(checkOut) &&
+  checkOut >= checkIn
+    ? { checkIn, checkOut }
+    : null;
 
 const mediaOrder: Prisma.PropertyMediaOrderByWithRelationInput[] = [
   { position: 'asc' },
@@ -34,7 +56,13 @@ const publicDetailSelect = {
     select: { type: true, label: true, description: true },
   },
   media: { orderBy: mediaOrder },
-  ownerProfile: { select: { id: true, user: { select: { name: true } } } },
+  ownerProfile: {
+    select: {
+      id: true,
+      createdAt: true,
+      user: { select: { name: true, avatarKey: true } },
+    },
+  },
   rooms: {
     where: { status: RoomStatus.AVAILABLE },
     orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
@@ -52,10 +80,26 @@ const publicDetailSelect = {
       cleaningFrequency: true,
       smokingPolicy: true,
       verificationStatus: true,
+      blockedWeekdays: true,
       media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
     },
   },
 } satisfies Prisma.PropertySelect;
+
+const publicDetailSelectFor = ({ checkIn, checkOut }: Period) =>
+  ({
+    ...publicDetailSelect,
+    rooms: {
+      ...publicDetailSelect.rooms,
+      select: {
+        ...publicDetailSelect.rooms.select,
+        blockedDates: {
+          where: { date: { gte: toDbDate(checkIn), lte: toDbDate(checkOut) } },
+          select: { date: true },
+        },
+      },
+    },
+  }) satisfies Prisma.PropertySelect;
 
 @Injectable()
 export class PublicPropertiesService {
@@ -64,10 +108,13 @@ export class PublicPropertiesService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async get(propertyId: string) {
+  async get(propertyId: string, query: PublicPropertyQueryDto = {}) {
+    const today = todayInSaoPaulo();
+    const period = consultedPeriod(query);
+    const evaluated = period ?? { checkIn: today, checkOut: today };
     const property = await this.prisma.property.findFirst({
       where: { id: propertyId, ...visiblePropertyWhere },
-      select: publicDetailSelect,
+      select: publicDetailSelectFor(evaluated),
     });
     if (!property) {
       throw new NotFoundException('Imóvel não encontrado.');
@@ -77,14 +124,39 @@ export class PublicPropertiesService {
 
     return {
       ...rest,
-      host: { id: ownerProfile.id, name: ownerProfile.user.name },
+      host: {
+        id: ownerProfile.id,
+        name: ownerProfile.user.name,
+        avatarUrl: this.mediaService.publicUrl(ownerProfile.user.avatarKey),
+        since: ownerProfile.createdAt,
+      },
+      availability: {
+        today,
+        windowEnd: availabilityWindowEnd(today),
+        period,
+      },
       media: property.media.map((item) => this.mediaService.toResponse(item)),
-      rooms: property.rooms.map(({ verificationStatus, ...room }) => ({
-        ...room,
-        ...resolveHouseServices(property, room),
-        verified: verificationStatus === RoomVerificationStatus.VERIFIED,
-        media: room.media.map((item) => this.mediaService.toResponse(item)),
-      })),
+      rooms: property.rooms.map(
+        ({ verificationStatus, blockedWeekdays, blockedDates, ...room }) => ({
+          ...room,
+          ...resolveHouseServices(property, room),
+          verified: verificationStatus === RoomVerificationStatus.VERIFIED,
+          availabilityStatus: isRangeFree(
+            evaluated.checkIn,
+            evaluated.checkOut,
+            {
+              blockedWeekdays,
+              blockedDates: blockedDates.map(({ date }) =>
+                date.toISOString().slice(0, 10),
+              ),
+            },
+            today,
+          )
+            ? ('AVAILABLE' as const)
+            : ('BLOCKED' as const),
+          media: room.media.map((item) => this.mediaService.toResponse(item)),
+        }),
+      ),
     };
   }
 }

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
 import {
+  availabilityWindowEnd,
   todayInSaoPaulo,
   weekdayOf,
 } from '../src/availability/availability-rules';
@@ -583,7 +584,80 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(body.rooms).toHaveLength(1);
     expect(body.rooms[0]).toMatchObject({
       acceptedAudiences: roomInput.acceptedAudiences,
+      availabilityStatus: 'AVAILABLE',
     });
+
+    const today = todayInSaoPaulo();
+    expect(body.availability).toEqual({
+      today,
+      windowEnd: availabilityWindowEnd(today),
+      period: null,
+    });
+    await prisma.roomBlockedDate.create({
+      data: { roomId: listed.room.id, date: new Date(`${today}T00:00:00Z`) },
+    });
+    const blockedToday = await http()
+      .get(`/properties/${listed.property.id}`)
+      .expect(200);
+    expect((blockedToday.body as { rooms: Body[] }).rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+    await prisma.roomBlockedDate.deleteMany({
+      where: { roomId: listed.room.id },
+    });
+    await prisma.room.update({
+      where: { id: listed.room.id },
+      data: { blockedWeekdays: [weekdayOf(today)] },
+    });
+    const blockedWeekday = await http()
+      .get(`/properties/${listed.property.id}`)
+      .expect(200);
+    expect((blockedWeekday.body as { rooms: Body[] }).rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const consult = async (query: string) => {
+      const response = await http()
+        .get(`/properties/${listed.property.id}?${query}`)
+        .expect(200);
+      return response.body as {
+        availability: { period: unknown };
+        rooms: Body[];
+      };
+    };
+
+    const singleDay = await consult(`checkIn=${tomorrow}`);
+    expect(singleDay.availability.period).toEqual({
+      checkIn: tomorrow,
+      checkOut: tomorrow,
+    });
+    expect(singleDay.rooms[0]).toMatchObject({
+      availabilityStatus: 'AVAILABLE',
+    });
+
+    const rangeWithBlockedDay = await consult(
+      `checkIn=${today}&checkOut=${tomorrow}`,
+    );
+    expect(rangeWithBlockedDay.availability.period).toEqual({
+      checkIn: today,
+      checkOut: tomorrow,
+    });
+    expect(rangeWithBlockedDay.rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+
+    for (const invalid of [
+      'checkIn=2026-02-30',
+      `checkIn=${tomorrow}&checkOut=${today}`,
+      `checkOut=${tomorrow}`,
+    ]) {
+      const ignored = await consult(invalid);
+      expect(ignored.availability.period).toBeNull();
+      expect(ignored.rooms[0]).toMatchObject({ availabilityStatus: 'BLOCKED' });
+    }
     for (const key of [
       'completenessScore',
       'rankingScore',
@@ -598,7 +672,14 @@ describe('Imóveis e quartos (e2e)', () => {
       .get(`/properties/${withoutAvailableRoom.property.id}`)
       .expect(404);
 
-    expect(body).toMatchObject({ host: { name: 'Proprietário de teste' } });
+    expect(body).toMatchObject({
+      host: {
+        name: 'Proprietário de teste',
+        avatarUrl: null,
+        since: expect.any(String) as unknown,
+      },
+    });
+    expect(body.host).not.toHaveProperty('avatarKey');
     const hostId = (body.host as { id: string }).id;
 
     const profile = await http().get(`/owners/${hostId}`).expect(200);
