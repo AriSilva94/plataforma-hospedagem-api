@@ -32,6 +32,8 @@ import { UsersModule } from './users/users.module';
             limit: Number(environmentService.get('THROTTLE_LIMIT') ?? 100),
           },
         ],
+        errorMessage:
+          'Muitas requisições. Aguarde um minuto e tente novamente.',
         storage: new RedisThrottlerStorage(
           redis,
           environmentService.get('THROTTLE_KEY_PREFIX') ?? 'throttle',
