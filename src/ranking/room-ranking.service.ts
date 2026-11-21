@@ -18,7 +18,7 @@ const snapshotSelect = {
   description: true,
   amenities: true,
   additionalInfo: true,
-  _count: { select: { media: imageCount } },
+  _count: { select: { media: imageCount, beds: true } },
   property: {
     select: {
       description: true,
@@ -144,6 +144,7 @@ function toSnapshot(room: SnapshotRow): CompletenessSnapshot {
     room: {
       description: room.description,
       amenities: room.amenities,
+      bedCount: room._count.beds,
       additionalInfo: room.additionalInfo,
       imageCount: room._count.media,
     },

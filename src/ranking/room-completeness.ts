@@ -30,6 +30,7 @@ export interface CompletenessSnapshot {
   room: {
     description: string | null;
     amenities: string[];
+    bedCount: number;
     additionalInfo: string | null;
     imageCount: number;
   };
@@ -56,7 +57,7 @@ export function evaluateCompleteness({
   const met: Record<CompletenessCriterion, boolean> = {
     ROOM_DESCRIPTION: Boolean(room.description),
     ROOM_PHOTOS: room.imageCount > 0,
-    ROOM_AMENITIES: room.amenities.length > 0,
+    ROOM_AMENITIES: room.amenities.length > 0 || room.bedCount > 0,
     ROOM_ADDITIONAL_INFO: Boolean(room.additionalInfo),
     PROPERTY_DESCRIPTION: Boolean(property.description),
     PROPERTY_PHOTOS: property.imageCount > 0,

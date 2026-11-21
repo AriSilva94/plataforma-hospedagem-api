@@ -53,7 +53,9 @@ const propertyDetailInclude = {
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
         take: 1,
       },
-      _count: { select: { media: { where: { type: MediaType.IMAGE } } } },
+      _count: {
+        select: { media: { where: { type: MediaType.IMAGE } }, beds: true },
+      },
     },
   },
 } satisfies Prisma.PropertyInclude;
@@ -461,6 +463,7 @@ export class PropertiesService {
           room: {
             description: room.description,
             amenities: room.amenities,
+            bedCount: _count.beds,
             additionalInfo: room.additionalInfo,
             imageCount: _count.media,
           },

@@ -176,6 +176,23 @@ describe('Ranking, completude e destaque de quartos (e2e)', () => {
     );
   });
 
+  it('considera camas no critério de comodidades do quarto', async () => {
+    const owner = await account();
+    const { roomId } = await publishedRoom(owner.cookie, {
+      amenities: [],
+      beds: [{ type: 'SINGLE', quantity: 1 }],
+    });
+
+    const roomDetail = await http()
+      .get(`/owner/rooms/${roomId}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+
+    expect((roomDetail.body as Body).completenessMissing).not.toContain(
+      'ROOM_AMENITIES',
+    );
+  });
+
   it('recalcula registros antigos sem versão de ranking (backfill)', async () => {
     const owner = await account();
     const { roomId } = await publishedRoom(owner.cookie, {
