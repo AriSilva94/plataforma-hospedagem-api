@@ -21,12 +21,13 @@ import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { withConsistentCleaning } from '../common/house-services';
-import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS } from './room-catalog';
+import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS, bedSelection } from './room-catalog';
 import { storyExpiresAt } from './room-story';
 
 type Transaction = Prisma.TransactionClient;
 
 const roomDetailInclude = {
+  beds: bedSelection,
   media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
@@ -100,8 +101,13 @@ export class RoomsService {
   async create(userId: string, propertyId: string, dto: CreateRoomDto) {
     const room = await this.prisma.$transaction(async (transaction) => {
       await this.propertiesService.lockOwned(transaction, userId, propertyId);
+      const { beds, ...fields } = dto;
       const created = await transaction.room.create({
-        data: { ...withConsistentCleaning(dto), propertyId },
+        data: {
+          ...withConsistentCleaning(fields),
+          propertyId,
+          beds: { create: beds ?? [] },
+        },
         select: { id: true },
       });
       await this.roomRanking.recalculateRoom(transaction, created.id);
@@ -145,10 +151,17 @@ export class RoomsService {
         userId,
         roomId,
       );
+      const { beds, ...fields } = dto;
       await transaction.room.update({
         where: { id: roomId },
-        data: withConsistentCleaning(dto),
+        data: withConsistentCleaning(fields),
       });
+      if (beds !== undefined) {
+        await transaction.roomBed.deleteMany({ where: { roomId } });
+        await transaction.roomBed.createMany({
+          data: beds.map((bed) => ({ ...bed, roomId })),
+        });
+      }
       await this.propertiesService.assertListedComplete(transaction, property);
       await this.roomRanking.recalculateRoom(transaction, roomId);
     });

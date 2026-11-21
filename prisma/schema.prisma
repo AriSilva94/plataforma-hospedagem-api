@@ -216,6 +216,15 @@ enum MediaType {
   VIDEO
 }
 
+enum BedType {
+  SINGLE
+  DOUBLE
+  QUEEN
+  KING
+  BUNK
+  SOFA_BED
+}
+
 model Property {
   id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerProfileId  String               @map("owner_profile_id") @db.Uuid
@@ -305,6 +314,7 @@ model Room {
   storyStatus                RoomStoryStatus        @default(PENDING) @map("story_status")
   storyRejectedReason        String?                @map("story_rejected_reason")
   storyApprovedAt            DateTime?              @map("story_approved_at")
+  beds                       RoomBed[]
   media                      RoomMedia[]
   storyMedia                 RoomStoryMedia[]
   storyViews                 RoomStoryView[]
@@ -317,6 +327,18 @@ model Room {
   @@index([status, rankingScore(sort: Desc), id])
   @@index([featuredUntil])
   @@map("rooms")
+}
+
+model RoomBed {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId   String  @map("room_id") @db.Uuid
+  room     Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type     BedType
+  quantity Int
+
+  @@unique([roomId, type])
+  @@index([roomId])
+  @@map("room_beds")
 }
 
 model RoomStoryMedia {

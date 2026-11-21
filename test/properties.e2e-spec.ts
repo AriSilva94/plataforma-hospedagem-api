@@ -496,6 +496,86 @@ describe('Imóveis e quartos (e2e)', () => {
       );
   });
 
+  it('cadastra e substitui camas do quarto', async () => {
+    const owner = await account();
+    const property = await createProperty(owner);
+    const rooms = `/owner/properties/${property.id}/rooms`;
+
+    const created = await http()
+      .post(rooms)
+      .set('Cookie', owner)
+      .send({
+        ...roomInput,
+        beds: [
+          { type: 'DOUBLE', quantity: 1 },
+          { type: 'SINGLE', quantity: 2 },
+        ],
+      })
+      .expect(201);
+    const { id } = created.body as { id: string };
+    expect((created.body as { beds: Body[] }).beds).toEqual([
+      { type: 'SINGLE', quantity: 2 },
+      { type: 'DOUBLE', quantity: 1 },
+    ]);
+
+    const patch = (body: Body) =>
+      http().patch(`/owner/rooms/${id}`).set('Cookie', owner).send(body);
+    const bedsOf = (response: { body: unknown }) =>
+      (response.body as { beds: Body[] }).beds;
+
+    expect(
+      bedsOf(
+        await patch({ beds: [{ type: 'BUNK', quantity: 1 }] }).expect(200),
+      ),
+    ).toEqual([{ type: 'BUNK', quantity: 1 }]);
+    expect(bedsOf(await patch({ title: 'Outro' }).expect(200))).toEqual([
+      { type: 'BUNK', quantity: 1 },
+    ]);
+    expect(bedsOf(await patch({ beds: [] }).expect(200))).toEqual([]);
+
+    const sevenRows = [
+      'SINGLE',
+      'DOUBLE',
+      'QUEEN',
+      'KING',
+      'BUNK',
+      'SOFA_BED',
+      'SINGLE',
+    ].map((type) => ({ type, quantity: 1 }));
+    for (const invalid of [
+      {
+        beds: [
+          { type: 'DOUBLE', quantity: 1 },
+          { type: 'DOUBLE', quantity: 2 },
+        ],
+      },
+      { beds: [{ type: 'DOUBLE', quantity: 0 }] },
+      { beds: [{ type: 'DOUBLE', quantity: 11 }] },
+      { beds: [{ type: 'HAMMOCK', quantity: 1 }] },
+      { beds: sevenRows },
+      { amenities: ['DOUBLE_BED'] },
+    ]) {
+      await patch(invalid).expect(400);
+      await http()
+        .post(rooms)
+        .set('Cookie', owner)
+        .send({ ...roomInput, ...invalid })
+        .expect(400);
+    }
+
+    const beds = [
+      { type: 'SINGLE', quantity: 2 },
+      { type: 'KING', quantity: 1 },
+    ];
+    const { propertyId } = await publishProperty(app, owner, {
+      room: { beds },
+    });
+    const detail = await http().get(`/properties/${propertyId}`).expect(200);
+    expect(
+      (detail.body as { rooms: { beds: Body[] }[] }).rooms[0].beds,
+    ).toEqual(beds);
+  });
+
   it('exclui rascunho com quartos e remove as mídias do storage', async () => {
     const owner = await account();
     const property = await createProperty(owner);

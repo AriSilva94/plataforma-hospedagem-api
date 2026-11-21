@@ -8,6 +8,7 @@ import { PrismaService } from '../infrastructure/prisma/prisma.service';
 import { MediaService } from '../media/media.service';
 import { resolveHouseServices } from '../common/house-services';
 import { visiblePropertyWhere } from './public-listing';
+import { bedSelection } from '../rooms/room-catalog';
 import {
   availabilityWindowEnd,
   isRangeFree,
@@ -81,6 +82,7 @@ const publicDetailSelect = {
       smokingPolicy: true,
       verificationStatus: true,
       blockedWeekdays: true,
+      beds: bedSelection,
       media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
     },
   },
