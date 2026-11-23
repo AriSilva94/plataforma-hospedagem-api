@@ -4,14 +4,21 @@ import {
   ArrayUnique,
   IsArray,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { TrimEach, TrimToNull } from '../../common/transforms';
-import { BRAZILIAN_STATES, PROPERTY_FEATURES } from '../property-catalog';
+import {
+  BRAZILIAN_STATES,
+  MAX_SHARED_BATHROOMS,
+  PROPERTY_FEATURES,
+} from '../property-catalog';
 import { OptionalNonNull } from '../../common/validation';
 import { HouseServicesFieldsDto } from '../../common/house-services';
 
@@ -83,6 +90,12 @@ export class PropertyFieldsDto extends HouseServicesFieldsDto {
   @IsOptional()
   @IsIn(BRAZILIAN_STATES, { message: 'UF inválida.' })
   state?: string | null;
+
+  @OptionalNonNull()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_SHARED_BATHROOMS)
+  sharedBathroomCount?: number;
 
   @TrimEach()
   @OptionalNonNull()

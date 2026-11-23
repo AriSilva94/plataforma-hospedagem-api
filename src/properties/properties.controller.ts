@@ -21,6 +21,7 @@ import { UploadPropertyMedia } from '../media/upload-media.decorator';
 import { CurrentUser } from '../users/current-user.decorator';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
+import { ReplaceSharedBathroomsDto } from './dto/replace-shared-bathrooms.dto';
 import { UpdatePropertyStatusDto } from './dto/update-property-status.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertiesService } from './properties.service';
@@ -84,6 +85,100 @@ export class PropertiesController {
     @Body() dto: ReplaceSharedAreasDto,
   ) {
     return this.propertiesService.replaceSharedAreas(user.id, propertyId, dto);
+  }
+
+  @Post(':propertyId/shared-areas/:sharedAreaId/media')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UploadPropertyMedia()
+  addSharedAreaMedia(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Param('sharedAreaId', ParseUUIDPipe) sharedAreaId: string,
+    @UploadedFile() file: UploadedMediaFile | undefined,
+  ) {
+    return this.propertiesService.addSharedAreaMedia(
+      user.id,
+      propertyId,
+      sharedAreaId,
+      file,
+    );
+  }
+
+  @Put(':propertyId/shared-areas/:sharedAreaId/media/order')
+  reorderSharedAreaMedia(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Param('sharedAreaId', ParseUUIDPipe) sharedAreaId: string,
+    @Body() dto: ReorderMediaDto,
+  ) {
+    return this.propertiesService.reorderSharedAreaMedia(
+      user.id,
+      propertyId,
+      sharedAreaId,
+      dto,
+    );
+  }
+
+  @Delete(':propertyId/shared-areas/:sharedAreaId/media/:mediaId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeSharedAreaMedia(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Param('sharedAreaId', ParseUUIDPipe) sharedAreaId: string,
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+  ) {
+    return this.propertiesService.removeSharedAreaMedia(
+      user.id,
+      propertyId,
+      sharedAreaId,
+      mediaId,
+    );
+  }
+
+  @Put(':propertyId/shared-bathrooms')
+  replaceSharedBathrooms(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Body() dto: ReplaceSharedBathroomsDto,
+  ) {
+    return this.propertiesService.replaceSharedBathrooms(
+      user.id,
+      propertyId,
+      dto,
+    );
+  }
+
+  @Post(':propertyId/shared-bathrooms/:sharedBathroomId/media')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UploadPropertyMedia()
+  addSharedBathroomMedia(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Param('sharedBathroomId', ParseUUIDPipe) sharedBathroomId: string,
+    @UploadedFile() file: UploadedMediaFile | undefined,
+  ) {
+    return this.propertiesService.addSharedBathroomMedia(
+      user.id,
+      propertyId,
+      sharedBathroomId,
+      file,
+    );
+  }
+
+  @Delete(':propertyId/shared-bathrooms/:sharedBathroomId/media/:mediaId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeSharedBathroomMedia(
+    @CurrentUser() user: User,
+    @Param('propertyId', ParseUUIDPipe) propertyId: string,
+    @Param('sharedBathroomId', ParseUUIDPipe) sharedBathroomId: string,
+    @Param('mediaId', ParseUUIDPipe) mediaId: string,
+  ) {
+    return this.propertiesService.removeSharedBathroomMedia(
+      user.id,
+      propertyId,
+      sharedBathroomId,
+      mediaId,
+    );
   }
 
   @Post(':propertyId/media')

@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
   ValidateIf,
@@ -15,6 +16,10 @@ import { TrimToNull } from '../../common/transforms';
 import { MAX_SHARED_AREAS } from '../property-catalog';
 
 export class SharedAreaDto {
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsEnum(SharedAreaType)
   type!: SharedAreaType;
 

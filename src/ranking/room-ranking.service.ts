@@ -18,7 +18,7 @@ const snapshotSelect = {
   description: true,
   amenities: true,
   additionalInfo: true,
-  _count: { select: { media: imageCount } },
+  _count: { select: { media: imageCount, beds: true } },
   property: {
     select: {
       description: true,
@@ -26,6 +26,7 @@ const snapshotSelect = {
       generalInfo: true,
       features: true,
       referencePoints: true,
+      sharedBathroomCount: true,
       _count: { select: { sharedAreas: true, media: imageCount } },
     },
   },
@@ -144,6 +145,7 @@ function toSnapshot(room: SnapshotRow): CompletenessSnapshot {
     room: {
       description: room.description,
       amenities: room.amenities,
+      bedCount: room._count.beds,
       additionalInfo: room.additionalInfo,
       imageCount: room._count.media,
     },
@@ -154,6 +156,7 @@ function toSnapshot(room: SnapshotRow): CompletenessSnapshot {
       features: room.property.features,
       referencePoints: room.property.referencePoints,
       sharedAreaCount: room.property._count.sharedAreas,
+      sharedBathroomCount: room.property.sharedBathroomCount,
       imageCount: room.property._count.media,
     },
   };

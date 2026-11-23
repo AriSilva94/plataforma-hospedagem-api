@@ -27,9 +27,14 @@ import {
 } from '../users/personal-data';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ReplaceSharedAreasDto } from './dto/replace-shared-areas.dto';
+import { ReplaceSharedBathroomsDto } from './dto/replace-shared-bathrooms.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { withConsistentCleaning } from '../common/house-services';
-import { MAX_PROPERTY_IMAGES, MAX_PROPERTY_VIDEOS } from './property-catalog';
+import {
+  MAX_PROPERTY_IMAGES,
+  MAX_PROPERTY_VIDEOS,
+  MAX_SHARED_AREA_IMAGES,
+} from './property-catalog';
 import {
   missingPublishRequirements,
   publishRequirementLabels,
@@ -44,7 +49,13 @@ const mediaOrder: Prisma.PropertyMediaOrderByWithRelationInput[] = [
 ];
 
 const propertyDetailInclude = {
-  sharedAreas: { orderBy: { position: 'asc' } },
+  sharedAreas: {
+    orderBy: { position: 'asc' },
+    include: {
+      media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+    },
+  },
+  sharedBathrooms: { orderBy: { position: 'asc' }, include: { media: true } },
   media: { orderBy: mediaOrder },
   rooms: {
     orderBy: { createdAt: 'asc' },
@@ -53,7 +64,9 @@ const propertyDetailInclude = {
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
         take: 1,
       },
-      _count: { select: { media: { where: { type: MediaType.IMAGE } } } },
+      _count: {
+        select: { media: { where: { type: MediaType.IMAGE } }, beds: true },
+      },
     },
   },
 } satisfies Prisma.PropertyInclude;
@@ -123,9 +136,20 @@ export class PropertiesService {
 
     assertCityOfState(dto.state, dto.city);
 
-    const property = await this.prisma.property.create({
-      data: { ...withConsistentCleaning(dto), ownerProfileId: ownerProfile.id },
-      select: { id: true },
+    const property = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.property.create({
+        data: {
+          ...withConsistentCleaning(dto),
+          ownerProfileId: ownerProfile.id,
+        },
+        select: { id: true },
+      });
+      await syncSharedBathroomCount(
+        transaction,
+        created.id,
+        dto.sharedBathroomCount ?? 0,
+      );
+      return created;
     });
     return this.get(userId, property.id);
   }
@@ -143,7 +167,7 @@ export class PropertiesService {
   }
 
   async update(userId: string, propertyId: string, dto: UpdatePropertyDto) {
-    await this.prisma.$transaction(async (transaction) => {
+    const removedKeys = await this.prisma.$transaction(async (transaction) => {
       const property = await this.lockOwned(transaction, userId, propertyId);
       const { state, city } = await transaction.property.update({
         where: { id: propertyId },
@@ -151,13 +175,25 @@ export class PropertiesService {
         select: { state: true, city: true },
       });
       assertCityOfState(state, city);
+      const keys =
+        dto.sharedBathroomCount === undefined
+          ? []
+          : await syncSharedBathroomCount(
+              transaction,
+              propertyId,
+              dto.sharedBathroomCount,
+            );
       await this.assertListedComplete(transaction, property);
       await this.roomRanking.recalculatePropertyIfChanged(
         transaction,
         propertyId,
         dto,
       );
+      return keys;
     });
+    if (removedKeys.length > 0) {
+      await this.mediaService.removeQuietly(removedKeys);
+    }
     return this.get(userId, propertyId);
   }
 
@@ -215,8 +251,23 @@ export class PropertiesService {
         where: { room: { propertyId } },
         select: { storageKey: true },
       });
+      const sharedAreaMedia =
+        await transaction.propertySharedAreaMedia.findMany({
+          where: { sharedArea: { propertyId } },
+          select: { storageKey: true },
+        });
+      const sharedBathroomMedia =
+        await transaction.propertySharedBathroomMedia.findMany({
+          where: { sharedBathroom: { propertyId } },
+          select: { storageKey: true },
+        });
       await transaction.property.delete({ where: { id: propertyId } });
-      return [...propertyMedia, ...roomMedia].map((media) => media.storageKey);
+      return [
+        ...propertyMedia,
+        ...roomMedia,
+        ...sharedAreaMedia,
+        ...sharedBathroomMedia,
+      ].map((media) => media.storageKey);
     });
     await this.mediaService.removeQuietly(storageKeys);
   }
@@ -226,23 +277,306 @@ export class PropertiesService {
     propertyId: string,
     { areas }: ReplaceSharedAreasDto,
   ) {
-    await this.prisma.$transaction(async (transaction) => {
+    const removedKeys = await this.prisma.$transaction(async (transaction) => {
       await this.lockOwned(transaction, userId, propertyId);
-      await transaction.propertySharedArea.deleteMany({
+      const current = await transaction.propertySharedArea.findMany({
         where: { propertyId },
+        select: { id: true },
       });
-      await transaction.propertySharedArea.createMany({
-        data: areas.map((area, position) => ({
-          propertyId,
+      const currentIds = new Set(current.map((area) => area.id));
+      const keptIds = areas.flatMap((area) => (area.id ? [area.id] : []));
+      if (
+        new Set(keptIds).size !== keptIds.length ||
+        keptIds.some((id) => !currentIds.has(id))
+      ) {
+        throw new BadRequestException('Área compartilhada inválida.');
+      }
+      const removedIds = [...currentIds].filter((id) => !keptIds.includes(id));
+      const removedMedia = await transaction.propertySharedAreaMedia.findMany({
+        where: { sharedAreaId: { in: removedIds } },
+        select: { storageKey: true },
+      });
+      await transaction.propertySharedArea.deleteMany({
+        where: { id: { in: removedIds } },
+      });
+      for (const [position, area] of areas.entries()) {
+        const data = {
           type: area.type,
           label: area.label ?? null,
           description: area.description ?? null,
           position,
-        })),
+        };
+        if (area.id) {
+          await transaction.propertySharedArea.update({
+            where: { id: area.id },
+            data,
+          });
+        } else {
+          await transaction.propertySharedArea.create({
+            data: { ...data, propertyId },
+          });
+        }
+      }
+      await this.roomRanking.recalculateProperty(transaction, propertyId);
+      return removedMedia.map((media) => media.storageKey);
+    });
+    if (removedKeys.length > 0) {
+      await this.mediaService.removeQuietly(removedKeys);
+    }
+    return this.get(userId, propertyId);
+  }
+
+  async addSharedAreaMedia(
+    userId: string,
+    propertyId: string,
+    sharedAreaId: string,
+    file: UploadedMediaFile | undefined,
+  ) {
+    await this.findOwned(userId, propertyId);
+    await this.findOwnedSharedArea(this.prisma, propertyId, sharedAreaId);
+    await this.mediaService.typeOf(file, [MediaType.IMAGE]);
+    assertSharedAreaMediaLimit(
+      await this.prisma.propertySharedAreaMedia.count({
+        where: { sharedAreaId, type: MediaType.IMAGE },
+      }),
+    );
+    const stored = await this.mediaService.store(
+      file,
+      `properties/${propertyId}/areas/${sharedAreaId}`,
+      [MediaType.IMAGE],
+    );
+
+    try {
+      const media = await this.prisma.$transaction(async (transaction) => {
+        await this.lockOwned(transaction, userId, propertyId);
+        await this.findOwnedSharedArea(transaction, propertyId, sharedAreaId);
+        const existing = await transaction.propertySharedAreaMedia.findMany({
+          where: { sharedAreaId },
+          select: { type: true, position: true },
+        });
+        assertSharedAreaMediaLimit(
+          existing.filter((item) => item.type === MediaType.IMAGE).length,
+        );
+        return transaction.propertySharedAreaMedia.create({
+          data: { ...stored, sharedAreaId, position: nextPosition(existing) },
+        });
+      });
+      return this.mediaService.toResponse(media);
+    } catch (error) {
+      await this.mediaService.removeQuietly([stored.storageKey]);
+      throw error;
+    }
+  }
+
+  async reorderSharedAreaMedia(
+    userId: string,
+    propertyId: string,
+    sharedAreaId: string,
+    { mediaIds }: ReorderMediaDto,
+  ) {
+    const media = await this.prisma.$transaction(async (transaction) => {
+      await this.lockOwned(transaction, userId, propertyId);
+      await this.findOwnedSharedArea(transaction, propertyId, sharedAreaId);
+      const current = await transaction.propertySharedAreaMedia.findMany({
+        where: { sharedAreaId },
+        select: { id: true },
+      });
+      this.mediaService.assertCompleteOrder(
+        current.map((item) => item.id),
+        mediaIds,
+      );
+      for (const [position, id] of mediaIds.entries()) {
+        await transaction.propertySharedAreaMedia.update({
+          where: { id },
+          data: { position },
+        });
+      }
+      return transaction.propertySharedAreaMedia.findMany({
+        where: { sharedAreaId },
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      });
+    });
+    return { media: media.map((item) => this.mediaService.toResponse(item)) };
+  }
+
+  async removeSharedAreaMedia(
+    userId: string,
+    propertyId: string,
+    sharedAreaId: string,
+    mediaId: string,
+  ): Promise<void> {
+    const storageKey = await this.prisma.$transaction(async (transaction) => {
+      await this.lockOwned(transaction, userId, propertyId);
+      const media = await transaction.propertySharedAreaMedia.findFirst({
+        where: { id: mediaId, sharedArea: { id: sharedAreaId, propertyId } },
+        select: { id: true, storageKey: true },
+      });
+      if (!media) {
+        throw new NotFoundException('Mídia não encontrada.');
+      }
+      await transaction.propertySharedAreaMedia.delete({
+        where: { id: media.id },
+      });
+      return media.storageKey;
+    });
+    await this.mediaService.removeQuietly([storageKey]);
+  }
+
+  async replaceSharedBathrooms(
+    userId: string,
+    propertyId: string,
+    { bathrooms }: ReplaceSharedBathroomsDto,
+  ) {
+    const removedKeys = await this.prisma.$transaction(async (transaction) => {
+      await this.lockOwned(transaction, userId, propertyId);
+      const current = await transaction.propertySharedBathroom.findMany({
+        where: { propertyId },
+        select: { id: true },
+      });
+      const currentIds = new Set(current.map((bathroom) => bathroom.id));
+      const keptIds = bathrooms.flatMap((bathroom) =>
+        bathroom.id ? [bathroom.id] : [],
+      );
+      if (
+        new Set(keptIds).size !== keptIds.length ||
+        keptIds.some((id) => !currentIds.has(id))
+      ) {
+        throw new BadRequestException('Banheiro inválido.');
+      }
+      const removedIds = [...currentIds].filter((id) => !keptIds.includes(id));
+      const removedMedia =
+        await transaction.propertySharedBathroomMedia.findMany({
+          where: { sharedBathroomId: { in: removedIds } },
+          select: { storageKey: true },
+        });
+      await transaction.propertySharedBathroom.deleteMany({
+        where: { id: { in: removedIds } },
+      });
+      for (const [position, bathroom] of bathrooms.entries()) {
+        if (bathroom.id) {
+          await transaction.propertySharedBathroom.update({
+            where: { id: bathroom.id },
+            data: { position },
+          });
+        } else {
+          await transaction.propertySharedBathroom.create({
+            data: { propertyId, position },
+          });
+        }
+      }
+      await transaction.property.update({
+        where: { id: propertyId },
+        data: { sharedBathroomCount: bathrooms.length },
       });
       await this.roomRanking.recalculateProperty(transaction, propertyId);
+      return removedMedia.map((media) => media.storageKey);
     });
+    if (removedKeys.length > 0) {
+      await this.mediaService.removeQuietly(removedKeys);
+    }
     return this.get(userId, propertyId);
+  }
+
+  async addSharedBathroomMedia(
+    userId: string,
+    propertyId: string,
+    sharedBathroomId: string,
+    file: UploadedMediaFile | undefined,
+  ) {
+    await this.findOwned(userId, propertyId);
+    await this.findOwnedSharedBathroom(
+      this.prisma,
+      propertyId,
+      sharedBathroomId,
+    );
+    await this.mediaService.typeOf(file, [MediaType.IMAGE]);
+    assertSharedBathroomWithoutPhoto(
+      await this.prisma.propertySharedBathroomMedia.count({
+        where: { sharedBathroomId },
+      }),
+    );
+    const stored = await this.mediaService.store(
+      file,
+      `properties/${propertyId}/bathrooms/${sharedBathroomId}`,
+      [MediaType.IMAGE],
+    );
+
+    try {
+      const media = await this.prisma.$transaction(async (transaction) => {
+        await this.lockOwned(transaction, userId, propertyId);
+        await this.findOwnedSharedBathroom(
+          transaction,
+          propertyId,
+          sharedBathroomId,
+        );
+        assertSharedBathroomWithoutPhoto(
+          await transaction.propertySharedBathroomMedia.count({
+            where: { sharedBathroomId },
+          }),
+        );
+        return transaction.propertySharedBathroomMedia.create({
+          data: { ...stored, sharedBathroomId, position: 0 },
+        });
+      });
+      return this.mediaService.toResponse(media);
+    } catch (error) {
+      await this.mediaService.removeQuietly([stored.storageKey]);
+      throw error;
+    }
+  }
+
+  async removeSharedBathroomMedia(
+    userId: string,
+    propertyId: string,
+    sharedBathroomId: string,
+    mediaId: string,
+  ): Promise<void> {
+    const storageKey = await this.prisma.$transaction(async (transaction) => {
+      await this.lockOwned(transaction, userId, propertyId);
+      const media = await transaction.propertySharedBathroomMedia.findFirst({
+        where: {
+          id: mediaId,
+          sharedBathroom: { id: sharedBathroomId, propertyId },
+        },
+        select: { id: true, storageKey: true },
+      });
+      if (!media) {
+        throw new NotFoundException('Mídia não encontrada.');
+      }
+      await transaction.propertySharedBathroomMedia.delete({
+        where: { id: media.id },
+      });
+      return media.storageKey;
+    });
+    await this.mediaService.removeQuietly([storageKey]);
+  }
+
+  private async findOwnedSharedBathroom(
+    client: Transaction,
+    propertyId: string,
+    sharedBathroomId: string,
+  ): Promise<void> {
+    const bathroom = await client.propertySharedBathroom.findFirst({
+      where: { id: sharedBathroomId, propertyId },
+      select: { id: true },
+    });
+    if (!bathroom) {
+      throw new NotFoundException('Banheiro não encontrado.');
+    }
+  }
+
+  private async findOwnedSharedArea(
+    client: Transaction,
+    propertyId: string,
+    sharedAreaId: string,
+  ): Promise<void> {
+    const area = await client.propertySharedArea.findFirst({
+      where: { id: sharedAreaId, propertyId },
+      select: { id: true },
+    });
+    if (!area) {
+      throw new NotFoundException('Área compartilhada não encontrada.');
+    }
   }
 
   async addMedia(
@@ -434,12 +768,29 @@ export class PropertiesService {
     }
   }
 
-  private toDetail({ media, rooms, ...property }: PropertyDetail) {
+  private toDetail({
+    media,
+    rooms,
+    sharedAreas,
+    sharedBathrooms,
+    ...property
+  }: PropertyDetail) {
     const propertyImageCount = media.filter(
       (item) => item.type === MediaType.IMAGE,
     ).length;
     return {
       ...property,
+      sharedAreas: sharedAreas.map(({ media: areaMedia, ...area }) => ({
+        ...area,
+        media: areaMedia.map((item) => this.mediaService.toResponse(item)),
+      })),
+      sharedBathrooms: sharedBathrooms.map((bathroom) => ({
+        id: bathroom.id,
+        position: bathroom.position,
+        media: bathroom.media
+          ? [this.mediaService.toResponse(bathroom.media)]
+          : [],
+      })),
       missingRequirements: missingPublishRequirements({
         ...property,
         imageCount: propertyImageCount,
@@ -461,6 +812,7 @@ export class PropertiesService {
           room: {
             description: room.description,
             amenities: room.amenities,
+            bedCount: _count.beds,
             additionalInfo: room.additionalInfo,
             imageCount: _count.media,
           },
@@ -470,7 +822,8 @@ export class PropertiesService {
             generalInfo: property.generalInfo,
             features: property.features,
             referencePoints: property.referencePoints,
-            sharedAreaCount: property.sharedAreas.length,
+            sharedAreaCount: sharedAreas.length,
+            sharedBathroomCount: property.sharedBathroomCount,
             imageCount: propertyImageCount,
           },
         }).missing,
@@ -479,6 +832,51 @@ export class PropertiesService {
         verificationRejectedReason: room.verificationRejectedReason,
       })),
     };
+  }
+}
+
+async function syncSharedBathroomCount(
+  transaction: Transaction,
+  propertyId: string,
+  count: number,
+): Promise<string[]> {
+  const current = await transaction.propertySharedBathroom.findMany({
+    where: { propertyId },
+    orderBy: { position: 'asc' },
+    select: { id: true, media: { select: { storageKey: true } } },
+  });
+  const removed = current.slice(count);
+  if (removed.length > 0) {
+    await transaction.propertySharedBathroom.deleteMany({
+      where: { id: { in: removed.map((bathroom) => bathroom.id) } },
+    });
+  }
+  if (count > current.length) {
+    await transaction.propertySharedBathroom.createMany({
+      data: Array.from({ length: count - current.length }, (_, index) => ({
+        propertyId,
+        position: current.length + index,
+      })),
+    });
+  }
+  return removed.flatMap((bathroom) =>
+    bathroom.media ? [bathroom.media.storageKey] : [],
+  );
+}
+
+function assertSharedBathroomWithoutPhoto(photoCount: number) {
+  if (photoCount > 0) {
+    throw new UnprocessableEntityException(
+      'Cada banheiro pode ter apenas 1 foto. Remova a atual para enviar outra.',
+    );
+  }
+}
+
+function assertSharedAreaMediaLimit(imageCount: number) {
+  if (imageCount >= MAX_SHARED_AREA_IMAGES) {
+    throw new UnprocessableEntityException(
+      'Cada área pode ter apenas 1 foto. Remova a atual para enviar outra.',
+    );
   }
 }
 

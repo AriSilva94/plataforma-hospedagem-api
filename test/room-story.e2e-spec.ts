@@ -9,7 +9,11 @@ import {
   publishProperty,
 } from './support/e2e';
 
-type StoryItem = { roomId: string; media: { type: string; url: string }[] };
+type StoryItem = {
+  roomId: string;
+  viewed: boolean;
+  media: { type: string; url: string }[];
+};
 
 const day = 24 * 60 * 60 * 1000;
 const mp4 = Buffer.concat([
@@ -41,10 +45,13 @@ describe('Story de destaque do quarto (e2e)', () => {
       .set('Cookie', cookie)
       .attach('file', file, name);
 
-  const stories = async () =>
-    (await http().get('/rooms/stories').expect(200)).body as {
-      items: StoryItem[];
-    };
+  const stories = async (cookie?: string) =>
+    (
+      await http()
+        .get('/rooms/stories')
+        .set('Cookie', cookie ?? '')
+        .expect(200)
+    ).body as { items: StoryItem[] };
 
   const feature = (admin: string, roomId: string) =>
     http()
@@ -55,6 +62,214 @@ describe('Story de destaque do quarto (e2e)', () => {
         featuredUntil: new Date(Date.now() + day).toISOString(),
       })
       .expect(200);
+
+  async function publicStory() {
+    const owner = await accounts.create();
+    const admin = await accounts.createAdmin();
+    const { roomId } = await publishProperty(app, owner.cookie);
+    await upload(owner.cookie, roomId, png, 'a.png').expect(201);
+    await feature(admin, roomId);
+    await http()
+      .put(`/admin/rooms/${roomId}/story/approved`)
+      .set('Cookie', admin)
+      .expect(200);
+    const { storyApprovedAt } = await prisma.room.findUniqueOrThrow({
+      where: { id: roomId },
+      select: { storyApprovedAt: true },
+    });
+    return {
+      owner,
+      admin,
+      roomId,
+      storyApprovedAt: storyApprovedAt as Date,
+    };
+  }
+
+  it('marca como visto só para o usuário que abriu o story', async () => {
+    const { roomId, storyApprovedAt } = await publicStory();
+    const guestA = await accounts.create(['GUEST']);
+    const guestB = await accounts.create(['GUEST']);
+    await prisma.roomStoryView.create({
+      data: { roomId, userId: guestA.id, storyApprovedAt },
+    });
+    const viewedBy = async (cookie?: string) =>
+      (await stories(cookie)).items.find((item) => item.roomId === roomId)
+        ?.viewed;
+
+    expect(await viewedBy(guestA.cookie)).toBe(true);
+    expect(await viewedBy(guestB.cookie)).toBe(false);
+    expect(await viewedBy()).toBe(false);
+    expect(await viewedBy('access_token=token-invalido')).toBe(false);
+  });
+
+  describe('registro de visualização', () => {
+    const view = (roomId: string, cookie?: string) =>
+      http()
+        .post(`/rooms/${roomId}/story/views`)
+        .set('Cookie', cookie ?? '');
+    const rows = (roomId: string) =>
+      prisma.roomStoryView.findMany({ where: { roomId } });
+
+    it('cria a linha na primeira abertura e incrementa nas seguintes', async () => {
+      const { roomId } = await publicStory();
+      const guest = await accounts.create(['GUEST']);
+
+      await view(roomId, guest.cookie).expect(204);
+      expect((await rows(roomId)).map((row) => row.viewCount)).toEqual([1]);
+
+      await view(roomId, guest.cookie).expect(204);
+      expect((await rows(roomId)).map((row) => row.viewCount)).toEqual([2]);
+
+      const listed = (await stories(guest.cookie)).items.find(
+        (item) => item.roomId === roomId,
+      );
+      expect(listed?.viewed).toBe(true);
+    });
+
+    it('mantém uma única linha em aberturas simultâneas do mesmo usuário', async () => {
+      const { roomId } = await publicStory();
+      const guest = await accounts.create(['GUEST']);
+
+      await Promise.all([
+        view(roomId, guest.cookie).expect(204),
+        view(roomId, guest.cookie).expect(204),
+      ]);
+
+      expect((await rows(roomId)).map((row) => row.viewCount)).toEqual([2]);
+    });
+
+    it('exige login', async () => {
+      const { roomId } = await publicStory();
+
+      await view(roomId).expect(401);
+    });
+
+    it('responde 404 quando o story não está público', async () => {
+      const guest = await accounts.create(['GUEST']);
+      const pending = await publicStory();
+      await prisma.room.update({
+        where: { id: pending.roomId },
+        data: { storyStatus: 'PENDING', storyApprovedAt: null },
+      });
+      const expired = await publicStory();
+      await prisma.room.update({
+        where: { id: expired.roomId },
+        data: { storyApprovedAt: new Date(Date.now() - day - 1000) },
+      });
+      const unfeatured = await publicStory();
+      await prisma.room.update({
+        where: { id: unfeatured.roomId },
+        data: { featuredFrom: null, featuredUntil: null },
+      });
+
+      await view(pending.roomId, guest.cookie).expect(404);
+      await view(expired.roomId, guest.cookie).expect(404);
+      await view(unfeatured.roomId, guest.cookie).expect(404);
+      await view('not-a-uuid', guest.cookie).expect(400);
+    });
+
+    it('abre novo ciclo quando o story é reaprovado', async () => {
+      const { roomId, admin } = await publicStory();
+      const guest = await accounts.create(['GUEST']);
+      await view(roomId, guest.cookie).expect(204);
+
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { storyApprovedAt: new Date(Date.now() - 60_000) },
+      });
+      await http()
+        .put(`/admin/rooms/${roomId}/story/approved`)
+        .set('Cookie', admin)
+        .expect(200);
+
+      const listed = (await stories(guest.cookie)).items.find(
+        (item) => item.roomId === roomId,
+      );
+      expect(listed?.viewed).toBe(false);
+
+      await view(roomId, guest.cookie).expect(204);
+      expect(await rows(roomId)).toHaveLength(2);
+    });
+  });
+
+  describe('métricas do proprietário', () => {
+    const metrics = async (cookie: string, roomId: string) =>
+      (
+        (
+          await http()
+            .get(`/owner/rooms/${roomId}`)
+            .set('Cookie', cookie)
+            .expect(200)
+        ).body as { storyViews: { unique: number; total: number } }
+      ).storyViews;
+    const view = (roomId: string, cookie: string) =>
+      http()
+        .post(`/rooms/${roomId}/story/views`)
+        .set('Cookie', cookie)
+        .expect(204);
+
+    it('conta usuários distintos e total de aberturas sem identificar quem viu', async () => {
+      const { owner, roomId } = await publicStory();
+      const guestA = await accounts.create(['GUEST']);
+      const guestB = await accounts.create(['GUEST']);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+
+      await view(roomId, guestA.cookie);
+      await view(roomId, guestA.cookie);
+      await view(roomId, guestB.cookie);
+
+      const response = await http()
+        .get(`/owner/rooms/${roomId}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+      expect((response.body as { storyViews: unknown }).storyViews).toEqual({
+        unique: 2,
+        total: 3,
+      });
+      expect(JSON.stringify(response.body)).not.toContain(guestA.id);
+      expect(JSON.stringify(response.body)).not.toContain(guestB.id);
+    });
+
+    it('não conta a abertura do próprio proprietário', async () => {
+      const { owner, roomId } = await publicStory();
+
+      await view(roomId, owner.cookie);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+      expect(await prisma.roomStoryView.count({ where: { roomId } })).toBe(0);
+    });
+
+    it('zera as métricas quando o story é reaprovado', async () => {
+      const { owner, admin, roomId } = await publicStory();
+      const guest = await accounts.create(['GUEST']);
+      await view(roomId, guest.cookie);
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 1,
+        total: 1,
+      });
+
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { storyApprovedAt: new Date(Date.now() - 60_000) },
+      });
+      await http()
+        .put(`/admin/rooms/${roomId}/story/approved`)
+        .set('Cookie', admin)
+        .expect(200);
+
+      expect(await metrics(owner.cookie, roomId)).toEqual({
+        unique: 0,
+        total: 0,
+      });
+    });
+  });
 
   it('limita a 3 mídias e aceita imagem e vídeo', async () => {
     const owner = await accounts.create();
@@ -154,6 +369,92 @@ describe('Story de destaque do quarto (e2e)', () => {
       select: { storyStatus: true },
     });
     expect(room.storyStatus).toBe('PENDING');
+  });
+
+  it('remove da home o story aprovado há 24 horas e volta ao reaprovar', async () => {
+    const owner = await accounts.create();
+    const admin = await accounts.createAdmin();
+    const { roomId } = await publishProperty(app, owner.cookie);
+    await upload(owner.cookie, roomId, png, 'a.png').expect(201);
+    await feature(admin, roomId);
+    const approve = () =>
+      http()
+        .put(`/admin/rooms/${roomId}/story/approved`)
+        .set('Cookie', admin)
+        .expect(200);
+    const listedIds = async () =>
+      (await stories()).items.map((item) => item.roomId);
+
+    await approve();
+    expect(await listedIds()).toContain(roomId);
+
+    const approvedAt = (
+      await prisma.room.findUniqueOrThrow({
+        where: { id: roomId },
+        select: { storyApprovedAt: true },
+      })
+    ).storyApprovedAt as Date;
+    expect(approvedAt).toBeInstanceOf(Date);
+
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { storyApprovedAt: new Date(Date.now() - day + 60_000) },
+    });
+    expect(await listedIds()).toContain(roomId);
+
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { storyApprovedAt: new Date(Date.now() - day - 1000) },
+    });
+    expect(await listedIds()).not.toContain(roomId);
+
+    const detail = await http()
+      .get(`/owner/rooms/${roomId}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+    const body = detail.body as {
+      storyStatus: string;
+      storyExpiresAt: string;
+    };
+    expect(body.storyStatus).toBe('APPROVED');
+    expect(new Date(body.storyExpiresAt).getTime()).toBeLessThan(Date.now());
+
+    await approve();
+    expect(await listedIds()).toContain(roomId);
+  });
+
+  it('limpa a aprovação ao voltar para análise ou recusar', async () => {
+    const owner = await accounts.create();
+    const admin = await accounts.createAdmin();
+    const { roomId } = await publishProperty(app, owner.cookie);
+    await upload(owner.cookie, roomId, png, 'a.png').expect(201);
+    const approvedAt = () =>
+      prisma.room
+        .findUniqueOrThrow({
+          where: { id: roomId },
+          select: { storyApprovedAt: true },
+        })
+        .then((room) => room.storyApprovedAt);
+
+    await http()
+      .put(`/admin/rooms/${roomId}/story/approved`)
+      .set('Cookie', admin)
+      .expect(200);
+    expect(await approvedAt()).not.toBeNull();
+
+    await upload(owner.cookie, roomId, png, 'b.png').expect(201);
+    expect(await approvedAt()).toBeNull();
+
+    await http()
+      .put(`/admin/rooms/${roomId}/story/approved`)
+      .set('Cookie', admin)
+      .expect(200);
+    await http()
+      .put(`/admin/rooms/${roomId}/story/rejected`)
+      .set('Cookie', admin)
+      .send({ reason: 'Imagem fora do padrão.' })
+      .expect(200);
+    expect(await approvedAt()).toBeNull();
   });
 
   it('não analisa quarto sem story', async () => {

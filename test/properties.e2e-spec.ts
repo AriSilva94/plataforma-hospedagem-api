@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
 import request from 'supertest';
 import {
+  availabilityWindowEnd,
   todayInSaoPaulo,
   weekdayOf,
 } from '../src/availability/availability-rules';
@@ -495,6 +496,353 @@ describe('Imóveis e quartos (e2e)', () => {
       );
   });
 
+  it('cadastra e substitui camas do quarto', async () => {
+    const owner = await account();
+    const property = await createProperty(owner);
+    const rooms = `/owner/properties/${property.id}/rooms`;
+
+    const created = await http()
+      .post(rooms)
+      .set('Cookie', owner)
+      .send({
+        ...roomInput,
+        beds: [
+          { type: 'DOUBLE', quantity: 1 },
+          { type: 'SINGLE', quantity: 2 },
+        ],
+      })
+      .expect(201);
+    const { id } = created.body as { id: string };
+    expect((created.body as { beds: Body[] }).beds).toEqual([
+      { type: 'SINGLE', quantity: 2 },
+      { type: 'DOUBLE', quantity: 1 },
+    ]);
+
+    const patch = (body: Body) =>
+      http().patch(`/owner/rooms/${id}`).set('Cookie', owner).send(body);
+    const bedsOf = (response: { body: unknown }) =>
+      (response.body as { beds: Body[] }).beds;
+
+    expect(
+      bedsOf(
+        await patch({ beds: [{ type: 'BUNK', quantity: 1 }] }).expect(200),
+      ),
+    ).toEqual([{ type: 'BUNK', quantity: 1 }]);
+    expect(bedsOf(await patch({ title: 'Outro' }).expect(200))).toEqual([
+      { type: 'BUNK', quantity: 1 },
+    ]);
+    expect(bedsOf(await patch({ beds: [] }).expect(200))).toEqual([]);
+
+    const sevenRows = [
+      'SINGLE',
+      'DOUBLE',
+      'QUEEN',
+      'KING',
+      'BUNK',
+      'SOFA_BED',
+      'SINGLE',
+    ].map((type) => ({ type, quantity: 1 }));
+    for (const invalid of [
+      {
+        beds: [
+          { type: 'DOUBLE', quantity: 1 },
+          { type: 'DOUBLE', quantity: 2 },
+        ],
+      },
+      { beds: [{ type: 'DOUBLE', quantity: 0 }] },
+      { beds: [{ type: 'DOUBLE', quantity: 11 }] },
+      { beds: [{ type: 'HAMMOCK', quantity: 1 }] },
+      { beds: sevenRows },
+      { amenities: ['DOUBLE_BED'] },
+    ]) {
+      await patch(invalid).expect(400);
+      await http()
+        .post(rooms)
+        .set('Cookie', owner)
+        .send({ ...roomInput, ...invalid })
+        .expect(400);
+    }
+
+    const beds = [
+      { type: 'SINGLE', quantity: 2 },
+      { type: 'KING', quantity: 1 },
+    ];
+    const { propertyId } = await publishProperty(app, owner, {
+      room: { beds },
+    });
+    const detail = await http().get(`/properties/${propertyId}`).expect(200);
+    expect(
+      (detail.body as { rooms: { beds: Body[] }[] }).rooms[0].beds,
+    ).toEqual(beds);
+  });
+
+  it('preserva áreas por id ao substituir e remove mídia das áreas excluídas', async () => {
+    const owner = await account();
+    const property = await createProperty(owner);
+    const path = `/owner/properties/${property.id}`;
+    const putAreas = (areas: Body[]) =>
+      http().put(`${path}/shared-areas`).set('Cookie', owner).send({ areas });
+    type Area = Body & { id: string; media: { id: string; url: string }[] };
+    const areasOf = (response: { body: unknown }) =>
+      (response.body as { sharedAreas: Area[] }).sharedAreas;
+
+    const [pool, kitchen] = areasOf(
+      await putAreas([{ type: 'POOL' }, { type: 'KITCHEN' }]).expect(200),
+    );
+    const poolPhoto = await upload(
+      owner,
+      `${path}/shared-areas/${pool.id}/media`,
+      png,
+      'piscina.png',
+    ).expect(201);
+    const kitchenPhoto = await upload(
+      owner,
+      `${path}/shared-areas/${kitchen.id}/media`,
+      png,
+      'cozinha.png',
+    ).expect(201);
+    const keyOf = (response: { body: unknown }) =>
+      (response.body as { url: string }).url.replace('https://media.test/', '');
+
+    const updated = areasOf(
+      await putAreas([
+        { type: 'BARBECUE' },
+        { id: pool.id, type: 'POOL', description: 'Aquecida' },
+      ]).expect(200),
+    );
+    expect(updated).toMatchObject([
+      { type: 'BARBECUE', position: 0, media: [] },
+      {
+        id: pool.id,
+        description: 'Aquecida',
+        position: 1,
+        media: [{ id: (poolPhoto.body as { id: string }).id }],
+      },
+    ]);
+    expect(storage.objects.has(keyOf(poolPhoto))).toBe(true);
+    expect(storage.objects.has(keyOf(kitchenPhoto))).toBe(false);
+
+    const other = await createProperty(owner);
+    await putAreas([{ id: kitchen.id, type: 'KITCHEN' }]).expect(400);
+    await http()
+      .put(`/owner/properties/${other.id}/shared-areas`)
+      .set('Cookie', owner)
+      .send({ areas: [{ id: pool.id, type: 'POOL' }] })
+      .expect(400);
+    await putAreas([{ type: 'SHARED_BATHROOM' }]).expect(400);
+  });
+
+  it('limita, reordena e remove mídias de área compartilhada', async () => {
+    const owner = await account();
+    const intruder = await account();
+    const property = await createProperty(owner);
+    const path = `/owner/properties/${property.id}`;
+    const response = await http()
+      .put(`${path}/shared-areas`)
+      .set('Cookie', owner)
+      .send({ areas: [{ type: 'LIVING_ROOM' }] })
+      .expect(200);
+    const [area] = (response.body as { sharedAreas: { id: string }[] })
+      .sharedAreas;
+    const mediaPath = `${path}/shared-areas/${area.id}/media`;
+
+    await upload(owner, mediaPath, mp4, 'tour.mp4').expect(400);
+    const photo = await upload(owner, mediaPath, png, 'sala.png').expect(201);
+    const photoId = (photo.body as { id: string }).id;
+    const previousPutCount = storage.putCount;
+    await upload(owner, mediaPath, png, 'outra.png').expect(422);
+    expect(storage.putCount).toBe(previousPutCount);
+
+    const legacyVideo = await prisma.propertySharedAreaMedia.create({
+      data: {
+        sharedAreaId: area.id,
+        type: 'VIDEO',
+        storageKey: `test/area-legacy/${area.id}/tour.mp4`,
+        mimeType: 'video/mp4',
+        sizeBytes: 1,
+        position: 1,
+      },
+    });
+    const videoId = legacyVideo.id;
+
+    await upload(intruder, mediaPath, png, 'x.png').expect(404);
+    await upload(
+      owner,
+      `${path}/shared-areas/${crypto.randomUUID()}/media`,
+      png,
+      'x.png',
+    ).expect(404);
+
+    const reordered = await http()
+      .put(`${mediaPath}/order`)
+      .set('Cookie', owner)
+      .send({ mediaIds: [videoId, photoId] })
+      .expect(200);
+    expect((reordered.body as { media: Body[] }).media).toMatchObject([
+      { id: videoId, position: 0 },
+      { id: photoId, position: 1 },
+    ]);
+
+    await http()
+      .delete(`${mediaPath}/${videoId}`)
+      .set('Cookie', intruder)
+      .expect(404);
+    await http()
+      .delete(`${mediaPath}/${videoId}`)
+      .set('Cookie', owner)
+      .expect(204);
+
+    await http()
+      .delete(`${mediaPath}/${photoId}`)
+      .set('Cookie', owner)
+      .expect(204);
+    await upload(owner, mediaPath, png, 'nova.png').expect(201);
+  });
+
+  it('salva banheiros das áreas comuns e expõe na página pública', async () => {
+    const owner = await account();
+    const property = await createProperty(owner, { sharedBathroomCount: 2 });
+    expect(property).toMatchObject({ sharedBathroomCount: 2 });
+
+    for (const sharedBathroomCount of [-1, 21, 1.5, null]) {
+      await http()
+        .patch(`/owner/properties/${property.id}`)
+        .set('Cookie', owner)
+        .send({ sharedBathroomCount })
+        .expect(400);
+    }
+
+    const { propertyId } = await publishProperty(app, owner, {
+      property: { sharedBathroomCount: 3 },
+      room: { amenities: ['SAFE', 'HAIR_DRYER'] },
+    });
+    const detail = await http().get(`/properties/${propertyId}`).expect(200);
+    expect(detail.body).toMatchObject({
+      sharedBathroomCount: 3,
+      sharedBathrooms: [
+        { position: 0, media: [] },
+        { position: 1, media: [] },
+        { position: 2, media: [] },
+      ],
+      rooms: [{ amenities: ['SAFE', 'HAIR_DRYER'] }],
+    });
+  });
+
+  it('gerencia banheiros comuns com uma foto cada', async () => {
+    const owner = await account();
+    const intruder = await account();
+    const property = await createProperty(owner, { sharedBathroomCount: 2 });
+    const path = `/owner/properties/${property.id}`;
+    type Bathroom = { id: string; position: number; media: { id: string }[] };
+    const bathroomsOf = (response: { body: unknown }) =>
+      (response.body as { sharedBathrooms: Bathroom[] }).sharedBathrooms;
+    const detailOf = async () =>
+      http().get(path).set('Cookie', owner).expect(200);
+
+    const [first, second] = bathroomsOf(await detailOf());
+    expect([first.position, second.position]).toEqual([0, 1]);
+    const mediaPath = `${path}/shared-bathrooms/${first.id}/media`;
+
+    await upload(owner, mediaPath, mp4, 'tour.mp4').expect(400);
+    const photo = await upload(owner, mediaPath, png, 'banheiro.png').expect(
+      201,
+    );
+    const photoKey = (photo.body as { url: string }).url.replace(
+      'https://media.test/',
+      '',
+    );
+    const previousPutCount = storage.putCount;
+    await upload(owner, mediaPath, png, 'outra.png').expect(422);
+    expect(storage.putCount).toBe(previousPutCount);
+    await upload(intruder, mediaPath, png, 'x.png').expect(404);
+    await upload(
+      owner,
+      `${path}/shared-bathrooms/${crypto.randomUUID()}/media`,
+      png,
+      'x.png',
+    ).expect(404);
+    expect(bathroomsOf(await detailOf())[0].media).toHaveLength(1);
+
+    const replace = (bathrooms: { id?: string }[]) =>
+      http()
+        .put(`${path}/shared-bathrooms`)
+        .set('Cookie', owner)
+        .send({ bathrooms });
+    await replace([{ id: crypto.randomUUID() }]).expect(400);
+    await replace([{ id: second.id }, { id: second.id }]).expect(400);
+    await http()
+      .put(`${path}/shared-bathrooms`)
+      .set('Cookie', intruder)
+      .send({ bathrooms: [] })
+      .expect(404);
+
+    const replaced = await replace([{ id: second.id }, {}]).expect(200);
+    expect(replaced.body).toMatchObject({
+      sharedBathroomCount: 2,
+      sharedBathrooms: [
+        { id: second.id, position: 0, media: [] },
+        { position: 1, media: [] },
+      ],
+    });
+    expect(storage.objects.has(photoKey)).toBe(false);
+
+    const [kept, added] = bathroomsOf(replaced);
+    const addedPhoto = await upload(
+      owner,
+      `${path}/shared-bathrooms/${added.id}/media`,
+      png,
+      'novo.png',
+    ).expect(201);
+    const addedKey = (addedPhoto.body as { url: string }).url.replace(
+      'https://media.test/',
+      '',
+    );
+
+    const grown = await http()
+      .patch(path)
+      .set('Cookie', owner)
+      .send({ sharedBathroomCount: 3 })
+      .expect(200);
+    expect(bathroomsOf(grown).map((bathroom) => bathroom.id)).toEqual([
+      kept.id,
+      added.id,
+      expect.any(String),
+    ]);
+    const shrunk = await http()
+      .patch(path)
+      .set('Cookie', owner)
+      .send({ sharedBathroomCount: 1 })
+      .expect(200);
+    expect(shrunk.body).toMatchObject({
+      sharedBathroomCount: 1,
+      sharedBathrooms: [{ id: kept.id }],
+    });
+    expect(storage.objects.has(addedKey)).toBe(false);
+
+    const keptPhoto = await upload(
+      owner,
+      `${path}/shared-bathrooms/${kept.id}/media`,
+      png,
+      'mantido.png',
+    ).expect(201);
+    const keptPhotoId = (keptPhoto.body as { id: string }).id;
+    await http()
+      .delete(`${path}/shared-bathrooms/${kept.id}/media/${keptPhotoId}`)
+      .set('Cookie', intruder)
+      .expect(404);
+    await http()
+      .delete(`${path}/shared-bathrooms/${kept.id}/media/${keptPhotoId}`)
+      .set('Cookie', owner)
+      .expect(204);
+    expect(bathroomsOf(await detailOf())[0].media).toEqual([]);
+
+    await replace([]).expect(200);
+    expect((await detailOf()).body).toMatchObject({
+      sharedBathroomCount: 0,
+      sharedBathrooms: [],
+    });
+  });
+
   it('exclui rascunho com quartos e remove as mídias do storage', async () => {
     const owner = await account();
     const property = await createProperty(owner);
@@ -511,7 +859,20 @@ describe('Imóveis e quartos (e2e)', () => {
       png,
       'b.png',
     ).expect(201);
-    const keys = [propertyImage, roomImage].map((response) =>
+    const areas = await http()
+      .put(`/owner/properties/${property.id}/shared-areas`)
+      .set('Cookie', owner)
+      .send({ areas: [{ type: 'POOL' }] })
+      .expect(200);
+    const [area] = (areas.body as { sharedAreas: { id: string }[] })
+      .sharedAreas;
+    const areaImage = await upload(
+      owner,
+      `/owner/properties/${property.id}/shared-areas/${area.id}/media`,
+      png,
+      'c.png',
+    ).expect(201);
+    const keys = [propertyImage, roomImage, areaImage].map((response) =>
       (response.body as { url: string }).url.replace('https://media.test/', ''),
     );
     expect(keys.every((key) => storage.objects.has(key))).toBe(true);
@@ -583,7 +944,80 @@ describe('Imóveis e quartos (e2e)', () => {
     expect(body.rooms).toHaveLength(1);
     expect(body.rooms[0]).toMatchObject({
       acceptedAudiences: roomInput.acceptedAudiences,
+      availabilityStatus: 'AVAILABLE',
     });
+
+    const today = todayInSaoPaulo();
+    expect(body.availability).toEqual({
+      today,
+      windowEnd: availabilityWindowEnd(today),
+      period: null,
+    });
+    await prisma.roomBlockedDate.create({
+      data: { roomId: listed.room.id, date: new Date(`${today}T00:00:00Z`) },
+    });
+    const blockedToday = await http()
+      .get(`/properties/${listed.property.id}`)
+      .expect(200);
+    expect((blockedToday.body as { rooms: Body[] }).rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+    await prisma.roomBlockedDate.deleteMany({
+      where: { roomId: listed.room.id },
+    });
+    await prisma.room.update({
+      where: { id: listed.room.id },
+      data: { blockedWeekdays: [weekdayOf(today)] },
+    });
+    const blockedWeekday = await http()
+      .get(`/properties/${listed.property.id}`)
+      .expect(200);
+    expect((blockedWeekday.body as { rooms: Body[] }).rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const consult = async (query: string) => {
+      const response = await http()
+        .get(`/properties/${listed.property.id}?${query}`)
+        .expect(200);
+      return response.body as {
+        availability: { period: unknown };
+        rooms: Body[];
+      };
+    };
+
+    const singleDay = await consult(`checkIn=${tomorrow}`);
+    expect(singleDay.availability.period).toEqual({
+      checkIn: tomorrow,
+      checkOut: tomorrow,
+    });
+    expect(singleDay.rooms[0]).toMatchObject({
+      availabilityStatus: 'AVAILABLE',
+    });
+
+    const rangeWithBlockedDay = await consult(
+      `checkIn=${today}&checkOut=${tomorrow}`,
+    );
+    expect(rangeWithBlockedDay.availability.period).toEqual({
+      checkIn: today,
+      checkOut: tomorrow,
+    });
+    expect(rangeWithBlockedDay.rooms[0]).toMatchObject({
+      availabilityStatus: 'BLOCKED',
+    });
+
+    for (const invalid of [
+      'checkIn=2026-02-30',
+      `checkIn=${tomorrow}&checkOut=${today}`,
+      `checkOut=${tomorrow}`,
+    ]) {
+      const ignored = await consult(invalid);
+      expect(ignored.availability.period).toBeNull();
+      expect(ignored.rooms[0]).toMatchObject({ availabilityStatus: 'BLOCKED' });
+    }
     for (const key of [
       'completenessScore',
       'rankingScore',
@@ -598,7 +1032,14 @@ describe('Imóveis e quartos (e2e)', () => {
       .get(`/properties/${withoutAvailableRoom.property.id}`)
       .expect(404);
 
-    expect(body).toMatchObject({ host: { name: 'Proprietário de teste' } });
+    expect(body).toMatchObject({
+      host: {
+        name: 'Proprietário de teste',
+        avatarUrl: null,
+        since: expect.any(String) as unknown,
+      },
+    });
+    expect(body.host).not.toHaveProperty('avatarKey');
     const hostId = (body.host as { id: string }).id;
 
     const profile = await http().get(`/owners/${hostId}`).expect(200);

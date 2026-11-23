@@ -21,11 +21,13 @@ import { RoomRankingService } from '../ranking/room-ranking.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { withConsistentCleaning } from '../common/house-services';
-import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS } from './room-catalog';
+import { MAX_ROOM_IMAGES, MAX_ROOM_VIDEOS, bedSelection } from './room-catalog';
+import { storyExpiresAt } from './room-story';
 
 type Transaction = Prisma.TransactionClient;
 
 const roomDetailInclude = {
+  beds: bedSelection,
   media: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   storyMedia: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   property: {
@@ -99,8 +101,13 @@ export class RoomsService {
   async create(userId: string, propertyId: string, dto: CreateRoomDto) {
     const room = await this.prisma.$transaction(async (transaction) => {
       await this.propertiesService.lockOwned(transaction, userId, propertyId);
+      const { beds, ...fields } = dto;
       const created = await transaction.room.create({
-        data: { ...withConsistentCleaning(dto), propertyId },
+        data: {
+          ...withConsistentCleaning(fields),
+          propertyId,
+          beds: { create: beds ?? [] },
+        },
         select: { id: true },
       });
       await this.roomRanking.recalculateRoom(transaction, created.id);
@@ -121,7 +128,20 @@ export class RoomsService {
     return {
       ...this.toDetail(room),
       completenessMissing: await this.roomRanking.missingCompleteness(room.id),
+      storyViews: await this.storyViews(room),
     };
+  }
+
+  private async storyViews(room: { id: string; storyApprovedAt: Date | null }) {
+    if (!room.storyApprovedAt) {
+      return { unique: 0, total: 0 };
+    }
+    const totals = await this.prisma.roomStoryView.aggregate({
+      where: { roomId: room.id, storyApprovedAt: room.storyApprovedAt },
+      _count: { _all: true },
+      _sum: { viewCount: true },
+    });
+    return { unique: totals._count._all, total: totals._sum.viewCount ?? 0 };
   }
 
   async update(userId: string, roomId: string, dto: UpdateRoomDto) {
@@ -131,10 +151,17 @@ export class RoomsService {
         userId,
         roomId,
       );
+      const { beds, ...fields } = dto;
       await transaction.room.update({
         where: { id: roomId },
-        data: withConsistentCleaning(dto),
+        data: withConsistentCleaning(fields),
       });
+      if (beds !== undefined) {
+        await transaction.roomBed.deleteMany({ where: { roomId } });
+        await transaction.roomBed.createMany({
+          data: beds.map((bed) => ({ ...bed, roomId })),
+        });
+      }
       await this.propertiesService.assertListedComplete(transaction, property);
       await this.roomRanking.recalculateRoom(transaction, roomId);
     });
@@ -291,6 +318,7 @@ export class RoomsService {
     const { _count, ...propertySummary } = property;
     return {
       ...room,
+      storyExpiresAt: storyExpiresAt(room),
       property: { ...propertySummary, availableRoomCount: _count.rooms },
       media: media.map((item) => this.mediaService.toResponse(item)),
       storyMedia: storyMedia.map((item) => this.mediaService.toResponse(item)),

@@ -1,4 +1,4 @@
-export const RANKING_VERSION = 1;
+export const RANKING_VERSION = 2;
 
 export interface RankingSignals {
   completenessScore: number;

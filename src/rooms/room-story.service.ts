@@ -14,6 +14,7 @@ import { listedRoomWhere } from '../properties/public-listing';
 import { PropertiesService } from '../properties/properties.service';
 import { MAX_ROOM_STORY_MEDIA } from './room-catalog';
 import { activeFeaturingWhere } from './room-featuring';
+import { activeStoryWhere } from './room-story';
 
 const PUBLIC_STORIES_LIMIT = 20;
 
@@ -30,13 +31,13 @@ export class RoomStoryService {
     private readonly mediaService: MediaService,
   ) {}
 
-  async listPublic() {
+  async listPublic(userId?: string) {
     const rooms = await this.prisma.room.findMany({
       where: {
         AND: [
           listedRoomWhere,
           activeFeaturingWhere(new Date()),
-          { storyStatus: RoomStoryStatus.APPROVED, storyMedia: { some: {} } },
+          activeStoryWhere(new Date()),
         ],
       },
       orderBy: [{ rankingScore: 'desc' }, { id: 'asc' }],
@@ -47,12 +48,15 @@ export class RoomStoryService {
         priceCents: true,
         capacity: true,
         acceptedAudiences: true,
+        storyApprovedAt: true,
         property: {
           select: { id: true, neighborhood: true, city: true, state: true },
         },
         storyMedia: { orderBy: storyMediaOrder },
       },
     });
+
+    const viewed = await this.viewedKeys(userId, rooms);
 
     return {
       items: rooms.map((room) => ({
@@ -65,6 +69,7 @@ export class RoomStoryService {
         neighborhood: room.property.neighborhood,
         city: room.property.city,
         state: room.property.state,
+        viewed: viewed.has(viewKey(room.id, room.storyApprovedAt)),
         media: room.storyMedia.map((media) => ({
           id: media.id,
           type: media.type,
@@ -72,6 +77,61 @@ export class RoomStoryService {
         })),
       })),
     };
+  }
+
+  async recordView(userId: string, roomId: string): Promise<void> {
+    const now = new Date();
+    const room = await this.prisma.room.findFirst({
+      where: {
+        AND: [
+          { id: roomId },
+          listedRoomWhere,
+          activeFeaturingWhere(now),
+          activeStoryWhere(now),
+        ],
+      },
+      select: {
+        storyApprovedAt: true,
+        property: { select: { ownerProfile: { select: { userId: true } } } },
+      },
+    });
+    if (!room?.storyApprovedAt) {
+      throw new NotFoundException('Story não encontrado.');
+    }
+    if (room.property.ownerProfile.userId === userId) {
+      return;
+    }
+    const storyApprovedAt = room.storyApprovedAt;
+
+    await this.prisma.roomStoryView.upsert({
+      where: {
+        roomId_userId_storyApprovedAt: { roomId, userId, storyApprovedAt },
+      },
+      create: { roomId, userId, storyApprovedAt },
+      update: { viewCount: { increment: 1 }, lastViewedAt: now },
+    });
+  }
+
+  private async viewedKeys(
+    userId: string | undefined,
+    rooms: { id: string; storyApprovedAt: Date | null }[],
+  ) {
+    if (!userId || rooms.length === 0) {
+      return new Set<string>();
+    }
+    const views = await this.prisma.roomStoryView.findMany({
+      where: {
+        userId,
+        OR: rooms.map((room) => ({
+          roomId: room.id,
+          storyApprovedAt: room.storyApprovedAt as Date,
+        })),
+      },
+      select: { roomId: true, storyApprovedAt: true },
+    });
+    return new Set(
+      views.map((view) => viewKey(view.roomId, view.storyApprovedAt)),
+    );
   }
 
   async addMedia(
@@ -168,12 +228,17 @@ export class RoomStoryService {
   }
 }
 
+function viewKey(roomId: string, storyApprovedAt: Date | null) {
+  return `${roomId}:${storyApprovedAt?.getTime()}`;
+}
+
 function resubmit(transaction: Prisma.TransactionClient, roomId: string) {
   return transaction.room.update({
     where: { id: roomId },
     data: {
       storyStatus: RoomStoryStatus.PENDING,
       storyRejectedReason: null,
+      storyApprovedAt: null,
     },
   });
 }

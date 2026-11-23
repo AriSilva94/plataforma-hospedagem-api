@@ -9,6 +9,7 @@ const empty: CompletenessSnapshot = {
   room: {
     description: null,
     amenities: [],
+    bedCount: 0,
     additionalInfo: null,
     imageCount: 0,
   },
@@ -19,6 +20,7 @@ const empty: CompletenessSnapshot = {
     features: [],
     referencePoints: [],
     sharedAreaCount: 0,
+    sharedBathroomCount: 0,
     imageCount: 0,
   },
 };
@@ -27,6 +29,7 @@ const complete: CompletenessSnapshot = {
   room: {
     description: 'Suíte arejada.',
     amenities: ['DESK'],
+    bedCount: 1,
     additionalInfo: 'Check-in após as 14h.',
     imageCount: 3,
   },
@@ -37,6 +40,7 @@ const complete: CompletenessSnapshot = {
     features: ['WIFI'],
     referencePoints: ['Metrô'],
     sharedAreaCount: 2,
+    sharedBathroomCount: 1,
     imageCount: 5,
   },
 };
@@ -78,10 +82,39 @@ describe('evaluateCompleteness', () => {
   it('considera dados do imóvel na completude do quarto', () => {
     const withoutSharedAreas = evaluateCompleteness({
       ...complete,
-      property: { ...complete.property, sharedAreaCount: 0 },
+      property: {
+        ...complete.property,
+        sharedAreaCount: 0,
+        sharedBathroomCount: 0,
+      },
     });
 
     expect(withoutSharedAreas.score).toBeLessThan(100);
     expect(withoutSharedAreas.missing).toEqual(['SHARED_AREAS']);
+  });
+
+  it('considera banheiros comuns no critério de áreas compartilhadas', () => {
+    const result = evaluateCompleteness({
+      ...complete,
+      property: { ...complete.property, sharedAreaCount: 0 },
+    });
+
+    expect(result).toEqual({ score: 100, missing: [] });
+  });
+
+  it('considera camas no critério de comodidades', () => {
+    const result = evaluateCompleteness({
+      ...empty,
+      room: { ...empty.room, bedCount: 1 },
+    });
+    const total = COMPLETENESS_CRITERIA.reduce(
+      (sum, criterion) => sum + COMPLETENESS_WEIGHTS[criterion],
+      0,
+    );
+
+    expect(result.missing).not.toContain('ROOM_AMENITIES');
+    expect(result.score).toBe(
+      Math.round((COMPLETENESS_WEIGHTS.ROOM_AMENITIES * 100) / total),
+    );
   });
 });

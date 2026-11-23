@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as argon2 from 'argon2';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import {
+  BedType,
   Prisma,
   type BathroomType,
   type GenderIdentity,
@@ -171,6 +172,8 @@ const GENDER_IDENTITIES: GenderIdentity[] = [
   'TRANS_WOMAN',
   'TRANS_MAN',
 ];
+
+const BED_TYPES = Object.values(BedType);
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -370,6 +373,7 @@ interface RoomPlan {
   bathroomType: BathroomType;
   acceptedAudiences: GenderIdentity[];
   amenities: string[];
+  beds: { type: BedType; quantity: number }[];
   additionalInfo: string | null;
   status: RoomStatus;
   imageCount: number;
@@ -417,6 +421,10 @@ function buildRoomPlan(propertyId: string, index: number): RoomPlan {
     }) as BathroomType,
     acceptedAudiences: pickSome(GENDER_IDENTITIES, 1, 4),
     amenities: pickSome(ROOM_AMENITIES, 0, 6),
+    beds: pickSome(BED_TYPES, 1, 2).map((type) => ({
+      type,
+      quantity: randomInt(1, 2),
+    })),
     additionalInfo: maybe(pick(ROOM_ADDITIONAL_INFO_POOL), 0.4),
     status,
     imageCount: randomInt(2, 3),
@@ -577,6 +585,7 @@ async function main(): Promise<void> {
   const propertyMediaRows: Prisma.PropertyMediaCreateManyInput[] = [];
   const sharedAreaRows: Prisma.PropertySharedAreaCreateManyInput[] = [];
   const roomRows: Prisma.RoomCreateManyInput[] = [];
+  const roomBedRows: Prisma.RoomBedCreateManyInput[] = [];
   const roomMediaRows: Prisma.RoomMediaCreateManyInput[] = [];
 
   for (const property of properties) {
@@ -607,6 +616,7 @@ async function main(): Promise<void> {
         room: {
           description: room.description,
           amenities: room.amenities,
+          bedCount: room.beds.length,
           additionalInfo: room.additionalInfo,
           imageCount: room.imageCount,
         },
@@ -617,6 +627,7 @@ async function main(): Promise<void> {
           features: property.features,
           referencePoints: property.referencePoints,
           sharedAreaCount: property.sharedAreaCount,
+          sharedBathroomCount: 0,
           imageCount: 2,
         },
       });
@@ -646,6 +657,10 @@ async function main(): Promise<void> {
           : null,
       });
 
+      for (const bed of room.beds) {
+        roomBedRows.push({ roomId: room.id, ...bed });
+      }
+
       (roomMediaTasks.get(room.id) ?? []).forEach((task, k) => {
         roomMediaRows.push({
           id: crypto.randomUUID(),
@@ -663,6 +678,7 @@ async function main(): Promise<void> {
   await prisma.propertyMedia.createMany({ data: propertyMediaRows });
   await prisma.propertySharedArea.createMany({ data: sharedAreaRows });
   await prisma.room.createMany({ data: roomRows });
+  await prisma.roomBed.createMany({ data: roomBedRows });
   await prisma.roomMedia.createMany({ data: roomMediaRows });
 
   const guestPasswordHash = await argon2.hash('Senha123!');

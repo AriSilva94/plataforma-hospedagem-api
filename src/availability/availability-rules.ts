@@ -5,6 +5,9 @@ export type RoomAvailability = {
 
 export const AVAILABILITY_WINDOW_MONTHS = 12;
 
+export const toDbDate = (value: string): Date =>
+  new Date(`${value}T00:00:00.000Z`);
+
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const toUtcMs = (date: string): number => {

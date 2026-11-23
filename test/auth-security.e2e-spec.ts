@@ -147,6 +147,22 @@ describe('Segurança de autenticação (e2e)', () => {
     }
   });
 
+  it('responde 429 com mensagem em português ao exceder o limite', async () => {
+    const refresh = () => request(app.getHttpServer()).post('/auth/refresh');
+    let response = await refresh();
+    for (
+      let attempt = 1;
+      response.status !== 429 && attempt < 12;
+      attempt += 1
+    ) {
+      response = await refresh();
+    }
+    expect(response.status).toBe(429);
+    expect(response.body).toMatchObject({
+      message: 'Muitas requisições. Aguarde um minuto e tente novamente.',
+    });
+  });
+
   it('normaliza DTOs e impede alterar outro usuário ou os próprios papéis', async () => {
     const session = await account();
     const cookie = `access_token=${session.accessToken}`;
