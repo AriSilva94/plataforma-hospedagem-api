@@ -24,6 +24,7 @@ export const PROPERTY_COMPLETENESS_FIELDS = [
   'generalInfo',
   'features',
   'referencePoints',
+  'sharedBathroomCount',
 ] as const;
 
 export interface CompletenessSnapshot {
@@ -41,6 +42,7 @@ export interface CompletenessSnapshot {
     features: string[];
     referencePoints: string[];
     sharedAreaCount: number;
+    sharedBathroomCount: number;
     imageCount: number;
   };
 }
@@ -64,7 +66,8 @@ export function evaluateCompleteness({
     PROPERTY_FEATURES: property.features.length > 0,
     HOUSE_RULES: Boolean(property.houseRules),
     GENERAL_INFO: Boolean(property.generalInfo),
-    SHARED_AREAS: property.sharedAreaCount > 0,
+    SHARED_AREAS:
+      property.sharedAreaCount > 0 || property.sharedBathroomCount > 0,
     REFERENCE_POINTS: property.referencePoints.length > 0,
   };
 

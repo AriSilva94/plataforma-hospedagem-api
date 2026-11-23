@@ -627,6 +627,7 @@ async function main(): Promise<void> {
           features: property.features,
           referencePoints: property.referencePoints,
           sharedAreaCount: property.sharedAreaCount,
+          sharedBathroomCount: 0,
           imageCount: 2,
         },
       });

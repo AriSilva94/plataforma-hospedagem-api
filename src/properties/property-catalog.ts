@@ -44,3 +44,5 @@ export const BRAZILIAN_STATES = [
 export const MAX_PROPERTY_IMAGES = 30;
 export const MAX_PROPERTY_VIDEOS = 3;
 export const MAX_SHARED_AREAS = 30;
+export const MAX_SHARED_AREA_IMAGES = 1;
+export const MAX_SHARED_BATHROOMS = 20;

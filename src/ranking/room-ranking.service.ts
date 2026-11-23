@@ -26,6 +26,7 @@ const snapshotSelect = {
       generalInfo: true,
       features: true,
       referencePoints: true,
+      sharedBathroomCount: true,
       _count: { select: { sharedAreas: true, media: imageCount } },
     },
   },
@@ -155,6 +156,7 @@ function toSnapshot(room: SnapshotRow): CompletenessSnapshot {
       features: room.property.features,
       referencePoints: room.property.referencePoints,
       sharedAreaCount: room.property._count.sharedAreas,
+      sharedBathroomCount: room.property.sharedBathroomCount,
       imageCount: room.property._count.media,
     },
   };

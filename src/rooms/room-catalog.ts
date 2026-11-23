@@ -11,6 +11,8 @@ export const ROOM_AMENITIES = [
   'DOOR_LOCK',
   'BED_LINEN',
   'TOWELS',
+  'SAFE',
+  'HAIR_DRYER',
 ] as const;
 
 export const MAX_ROOM_IMAGES = 20;

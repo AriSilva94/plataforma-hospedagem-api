@@ -52,9 +52,19 @@ const publicDetailSelect = {
   hasCleaner: true,
   cleaningFrequency: true,
   smokingPolicy: true,
+  sharedBathroomCount: true,
   sharedAreas: {
     orderBy: { position: 'asc' },
-    select: { type: true, label: true, description: true },
+    select: {
+      type: true,
+      label: true,
+      description: true,
+      media: { orderBy: mediaOrder },
+    },
+  },
+  sharedBathrooms: {
+    orderBy: { position: 'asc' },
+    select: { position: true, media: true },
   },
   media: { orderBy: mediaOrder },
   ownerProfile: {
@@ -138,6 +148,14 @@ export class PublicPropertiesService {
         period,
       },
       media: property.media.map((item) => this.mediaService.toResponse(item)),
+      sharedAreas: property.sharedAreas.map(({ media, ...area }) => ({
+        ...area,
+        media: media.map((item) => this.mediaService.toResponse(item)),
+      })),
+      sharedBathrooms: property.sharedBathrooms.map(({ position, media }) => ({
+        position,
+        media: media ? [this.mediaService.toResponse(media)] : [],
+      })),
       rooms: property.rooms.map(
         ({ verificationStatus, blockedWeekdays, blockedDates, ...room }) => ({
           ...room,
