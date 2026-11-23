@@ -63,9 +63,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: node --test test/manual-deploy-workflow.test.mjs test/audit.test.mjs
+      - run: node --test test/manual-deploy-workflow.test.mjs
       - run: npm ci --no-audit --no-fund
-      - run: node scripts/audit.mjs
+      - run: npm audit --audit-level=high
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npm run typecheck
