@@ -23,7 +23,7 @@ describe('EmailService', () => {
             SMTP_HOST: 'smtp.resend.com',
             SMTP_PORT: '465',
             SMTP_SECURE: 'true',
-            EMAIL_FROM: 'DOMUS X <auth@arisilva.tech>',
+            EMAIL_FROM: 'CliqueQuarto <auth@arisilva.tech>',
             FRONTEND_URL: 'https://domusx-dev.arisilva.tech',
           })[name],
       ),
@@ -50,7 +50,7 @@ describe('EmailService', () => {
       }),
     );
     expect(sendMail).toHaveBeenCalledWith(
-      expect.objectContaining({ from: 'DOMUS X <auth@arisilva.tech>' }),
+      expect.objectContaining({ from: 'CliqueQuarto <auth@arisilva.tech>' }),
     );
   });
 
@@ -84,7 +84,7 @@ describe('EmailService', () => {
     await service.sendPasswordChanged('guest@example.com');
 
     const message = sendMail.mock.calls[0][0];
-    expect(message.subject).toBe('Sua senha da DOMUS X foi alterada');
+    expect(message.subject).toBe('Sua senha do CliqueQuarto foi alterada');
     expect(message.html).toContain(
       'href="https://domusx-dev.arisilva.tech/recuperar-senha"',
     );
@@ -125,7 +125,7 @@ describe('EmailService', () => {
     const message = sendMail.mock.calls[0][0];
     const confirmUrl =
       'https://domusx-dev.arisilva.tech/confirmar-email#token=token';
-    expect(message.subject).toBe('Confirme seu e-mail na DOMUS X');
+    expect(message.subject).toBe('Confirme seu e-mail no CliqueQuarto');
     expect(message.text).toContain(confirmUrl);
     expect(message.html).toContain(`href="${confirmUrl}"`);
     expect(message.text).toContain('O link vale por 24 horas');
@@ -139,7 +139,7 @@ describe('EmailService', () => {
     const message = sendMail.mock.calls[0][0];
     const completeUrl =
       'https://domusx-dev.arisilva.tech/concluir-cadastro#token=token';
-    expect(message.subject).toBe('Conclua seu cadastro na DOMUS X');
+    expect(message.subject).toBe('Conclua seu cadastro no CliqueQuarto');
     expect(message.text).toContain(completeUrl);
     expect(message.html).toContain(`href="${completeUrl}"`);
     expect(message.text).toContain('O link vale por 24 horas');
@@ -151,7 +151,7 @@ describe('EmailService', () => {
     await service.sendAccountExists('guest@example.com');
 
     const message = sendMail.mock.calls[0][0];
-    expect(message.subject).toBe('Você já tem uma conta na DOMUS X');
+    expect(message.subject).toBe('Você já tem uma conta no CliqueQuarto');
     expect(message.html).toContain(
       'href="https://domusx-dev.arisilva.tech/login"',
     );

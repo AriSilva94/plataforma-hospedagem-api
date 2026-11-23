@@ -4,8 +4,7 @@ export type EmailMessage = {
   html: string;
 };
 
-const BRAND = 'DOMUS X';
-const BRAND_NOWRAP = 'DOMUS\u00a0X';
+const BRAND = 'CliqueQuarto';
 const TAGLINE = 'Seu espaço, do seu jeito.';
 const NOT_YOU = 'Não foi você?';
 
@@ -113,8 +112,7 @@ body { margin: 0; padding: 0; }
 <td style="padding:0 4px 24px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
 <tr>
-<td width="32" height="32" align="center" valign="middle" bgcolor="${color.blue}" style="width:32px;height:32px;border-radius:10px;background-color:${color.blue};font-family:${font.sans};font-size:14px;line-height:32px;font-weight:800;color:${color.white};">D</td>
-<td valign="middle" style="padding-left:10px;font-family:${font.sans};font-size:16px;line-height:32px;font-weight:800;color:${color.white};">${BRAND}</td>
+<td valign="middle" style="font-family:${font.sans};font-size:22px;line-height:32px;font-weight:800;letter-spacing:-0.02em;color:${color.white};">clique<span style="color:${color.blueLight};">quarto</span></td>
 </tr>
 </table>
 </td>
@@ -128,7 +126,7 @@ ${options.content}
 <td style="padding:28px 4px 0;">
 <p style="margin:0 0 12px;font-family:${font.serif};font-size:16px;line-height:1.4;color:${color.bluePale};">${TAGLINE}</p>
 <p style="margin:0 0 6px;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.gray};">${escapeHtml(options.reason)}</p>
-<p style="margin:0;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.gray};">&copy; ${year} ${BRAND_NOWRAP}. Todos os direitos reservados.</p>
+<p style="margin:0;font-family:${font.sans};font-size:12px;line-height:1.6;color:${color.gray};">&copy; ${year} ${BRAND}. Todos os direitos reservados.</p>
 </td>
 </tr>
 </table>
@@ -194,20 +192,20 @@ export function passwordResetEmail(
   validityMinutes: number,
 ): EmailMessage {
   return oneTimeLinkEmail({
-    subject: `Redefina sua senha da ${BRAND}`,
+    subject: `Redefina sua senha do ${BRAND}`,
     title: 'Redefina sua senha',
-    request: `Recebemos um pedido para redefinir a senha da sua conta ${BRAND_NOWRAP}.`,
+    request: `Recebemos um pedido para redefinir a senha da sua conta ${BRAND}.`,
     instruction: 'Use o botão abaixo para escolher uma nova.',
     action: 'Redefinir senha',
     url: resetUrl,
     validityMinutes,
     reassurance: 'Ignore este e-mail. Sua senha continua a mesma.',
-    reason: `Você recebeu este e-mail porque foi pedida a redefinição de senha de uma conta ${BRAND_NOWRAP} com este endereço.`,
+    reason: `Você recebeu este e-mail porque foi pedida a redefinição de senha de uma conta ${BRAND} com este endereço.`,
   });
 }
 
 export function passwordChangedEmail(recoverUrl: string): EmailMessage {
-  const summary = `A senha da sua conta ${BRAND_NOWRAP} acabou de ser alterada. Todas as sessões abertas foram encerradas.`;
+  const summary = `A senha da sua conta ${BRAND} acabou de ser alterada. Todas as sessões abertas foram encerradas.`;
   const recovery =
     'Alguém pode ter acesso ao seu e-mail. Redefina a senha agora e troque também a senha do seu e-mail.';
   const content = [
@@ -219,7 +217,7 @@ export function passwordChangedEmail(recoverUrl: string): EmailMessage {
   ].join('\n');
 
   return {
-    subject: `Sua senha da ${BRAND} foi alterada`,
+    subject: `Sua senha do ${BRAND} foi alterada`,
     text: [
       summary,
       '',
@@ -230,7 +228,7 @@ export function passwordChangedEmail(recoverUrl: string): EmailMessage {
       title: 'Sua senha foi alterada',
       preheader: 'Se não foi você, redefina a senha agora.',
       content,
-      reason: `Você recebeu este e-mail porque a senha de uma conta ${BRAND_NOWRAP} com este endereço foi alterada.`,
+      reason: `Você recebeu este e-mail porque a senha de uma conta ${BRAND} com este endereço foi alterada.`,
     }),
   };
 }
@@ -242,7 +240,7 @@ export function welcomeEmail(name: string, profileUrl: string): EmailMessage {
   const greeting = PERSON_NAME.test(firstName)
     ? `Boas-vindas, ${firstName}.`
     : 'Boas-vindas.';
-  const intro = `Sua conta ${BRAND_NOWRAP} está criada. Falta só dizer como você vai usar a plataforma: como hóspede, como proprietário ou os dois.`;
+  const intro = `Sua conta ${BRAND} está criada. Falta só dizer como você vai usar a plataforma: como hóspede, como proprietário ou os dois.`;
   const content = [
     heading(greeting),
     paragraph(intro),
@@ -258,16 +256,16 @@ export function welcomeEmail(name: string, profileUrl: string): EmailMessage {
   ].join('\n');
 
   return {
-    subject: `Boas-vindas à ${BRAND}`,
+    subject: `Boas-vindas ao ${BRAND}`,
     text: [greeting, '', intro, '', `Escolha seu perfil: ${profileUrl}`].join(
       '\n',
     ),
     html: layout({
-      title: `Boas-vindas à ${BRAND}`,
+      title: `Boas-vindas ao ${BRAND}`,
       preheader:
         'Sua conta está criada. Escolha seu perfil para começar a usar.',
       content,
-      reason: `Você recebeu este e-mail porque uma conta ${BRAND_NOWRAP} foi criada com este endereço.`,
+      reason: `Você recebeu este e-mail porque uma conta ${BRAND} foi criada com este endereço.`,
     }),
   };
 }
@@ -277,15 +275,15 @@ export function emailConfirmationEmail(
   validityMinutes: number,
 ): EmailMessage {
   return oneTimeLinkEmail({
-    subject: `Confirme seu e-mail na ${BRAND}`,
+    subject: `Confirme seu e-mail no ${BRAND}`,
     title: 'Confirme seu e-mail',
-    request: `Confirme que este e-mail é seu para usar a ${BRAND_NOWRAP}.`,
+    request: `Confirme que este e-mail é seu para usar o ${BRAND}.`,
     action: 'Confirmar e-mail',
     url: confirmUrl,
     validityMinutes,
     reassurance:
       'Ignore este e-mail. Nada acontece com este endereço sem a confirmação.',
-    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
+    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro no ${BRAND}.`,
   });
 }
 
@@ -294,16 +292,16 @@ export function registrationConfirmationEmail(
   validityMinutes: number,
 ): EmailMessage {
   return oneTimeLinkEmail({
-    subject: `Conclua seu cadastro na ${BRAND}`,
+    subject: `Conclua seu cadastro no ${BRAND}`,
     title: 'Conclua seu cadastro',
-    request: `Confirme que este e-mail é seu para criar sua conta ${BRAND_NOWRAP}.`,
+    request: `Confirme que este e-mail é seu para criar sua conta ${BRAND}.`,
     instruction: 'Use o botão abaixo para definir a senha de acesso.',
     action: 'Concluir cadastro',
     url: completeUrl,
     validityMinutes,
     reassurance:
       'Ignore este e-mail. Nenhuma conta é criada sem que você defina a senha.',
-    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
+    reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro no ${BRAND}.`,
   });
 }
 
@@ -311,7 +309,7 @@ export function accountExistsEmail(
   loginUrl: string,
   recoverUrl: string,
 ): EmailMessage {
-  const summary = `Alguém tentou criar uma conta ${BRAND_NOWRAP} com este e-mail, mas ele já tem uma conta. Nenhuma conta nova foi criada.`;
+  const summary = `Alguém tentou criar uma conta ${BRAND} com este e-mail, mas ele já tem uma conta. Nenhuma conta nova foi criada.`;
   const forgot = 'Esqueceu a senha?';
   const reassurance =
     'Ignore este e-mail. Sua conta e sua senha continuam as mesmas.';
@@ -328,7 +326,7 @@ export function accountExistsEmail(
   ].join('\n');
 
   return {
-    subject: `Você já tem uma conta na ${BRAND}`,
+    subject: `Você já tem uma conta no ${BRAND}`,
     text: [
       summary,
       '',
@@ -341,7 +339,7 @@ export function accountExistsEmail(
       title: 'Você já tem uma conta',
       preheader: 'Nenhuma conta nova foi criada. Entre com a que você já tem.',
       content,
-      reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro na ${BRAND_NOWRAP}.`,
+      reason: `Você recebeu este e-mail porque este endereço foi informado em um cadastro no ${BRAND}.`,
     }),
   };
 }
